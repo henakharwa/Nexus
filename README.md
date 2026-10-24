@@ -19,7 +19,8 @@ See `docs/spec.md` for the product spec. The original spec for the retired proto
   (a team's projects and files, file contents, comments). It can also **write**: comment on or
   open a PR, push a commit, create a branch or issue, post to Slack, append to
   a Notion page, and so on. Every write becomes an approval card that an Admin
-  must confirm before anything happens (`services/chat-server/src/actions.ts`).
+  must confirm before anything happens (`services/chat-server/src/actions.ts`),
+  unless a workspace approval rule says otherwise (see "Approval rules").
 - **Accounts and workspaces.** Sign in with email + password, GitHub or
   Google. Create a workspace, or join one with a shareable link or code.
 - **Roles.** Each member is an **Admin** or an **Editor**. See "Workspace
@@ -33,8 +34,8 @@ See `docs/spec.md` for the product spec. The original spec for the retired proto
   saved token, they're asked to reconnect.
 - **Workspace pages** (`apps/web/app/w/[id]/`): Overview, Tasks (a board with
   owners and due dates), Workflows (manual, scheduled, GitHub issue/status and
-  Slack-mention triggers), Agents, Artifacts, Memory, Notifications,
-  Activity/audit log, Observability and Integrations.
+  Slack-mention triggers), Approvals (approval rules), Agents, Artifacts,
+  Memory, Notifications, Activity/audit log, Observability and Integrations.
 - **Limits.** A message length limit, and a cap on agent turns per person per
   hour (`AGENT_TURNS_PER_USER_PER_HOUR`, default 60).
 
@@ -393,13 +394,98 @@ Every member is an **Admin** or an **Editor**. The workspace creator starts
 as an Admin, and invites say which role a new member gets.
 
 - **Admins** approve or cancel the agent's proposed writes, manage members
-  and roles, archive and delete conversations (logged in Activity), and can
-  take over workflows whose owner left.
+  and roles, set approval rules, archive and delete conversations (logged in
+  Activity), and can take over workflows whose owner left.
 - **Editors** chat with the agent and teammates, and use tasks, workflows,
   memory and artifacts, but can't approve writes.
 - A workspace always keeps at least one Admin.
 
 The full matrix is in `docs/Nexus Role Access Matrix.docx`.
+
+## Approval rules
+
+Admins set rules on the workspace's **Approvals** page that decide what
+happens when the agent proposes a write. Every member can see the rules.
+The engine is `services/chat-server/src/approval-rules.ts`, and the API is
+`services/chat-server/src/routes/approval-rules.ts`.
+
+A rule matches on any combination of:
+
+- **Tool:** GitHub, Slack, Linear, Notion, Figma, or any tool.
+- **Action type:** create, comment, update, merge, file change, create
+  branch, delete or archive, Slack message, or other.
+- **Repository and branch** (GitHub) and **channel** (Slack): comma-separated
+  patterns where `*` matches anything, such as `acme/*` or `main, release/*`.
+  The branch is the one the change lands on: for a pull request or a merge,
+  the branch it merges into (looked up from GitHub), and for a file change
+  that doesn't name a branch, the repository's default branch. A Slack
+  channel can be written by name or ID; Nexus looks up the name when the
+  agent only gives an ID.
+
+Each rule has one effect:
+
+| Effect | What happens |
+|---|---|
+| Auto-approve | The action runs right away as the requester. It's still recorded, and posted in the chat and the activity log. |
+| Require approvals | 1 to 5 people **other than the requester** must approve. Each approver counts once, and the card shows the progress. |
+| Block | The action is refused before anyone is asked, and the agent is told which rule stopped it. |
+
+How rules combine:
+
+- **Strictest wins**, whatever order the rules are in: block, then the most
+  approvals, then a normal approval card, then auto-approve.
+- **Unknown counts as a match for restrictive rules.** If Nexus can't tell a
+  value a rule asks about (for example, which branch a merge goes into),
+  block and require-approvals rules still apply, and auto-approve rules
+  don't.
+- **Rules are checked again at approval time,** so a rule added or tightened
+  after an action was proposed still applies to it.
+- **Workflows marked "Requires approval" are never auto-approved.** Block and
+  require-approvals rules still apply to them.
+- **No rules means no change:** every write gets a normal approval card that
+  anyone allowed to approve can confirm, including the requester.
+
+**Starting point.** A workspace with no rules gets an **Add recommended
+rules** button that creates three rules:
+
+- Block deletes and archives.
+- Merges and file changes on `main`, `master` and `release/*` need extra
+  approval: two people when at least three members can approve, otherwise one.
+- Comments run without approval.
+
+The page also warns when a rule asks for more approvers than the workspace
+has. Remember the requester can't approve their own, so a team with two
+approvers can't meet a "2 approvers" rule when one of them asks.
+
+**Standing approvals.** On a card that no rule governs, an approver can tick
+**Also approve similar actions for 7 days**. Later actions with the same
+tool on the same repository (GitHub), channel (Slack) or tool (Linear,
+Notion, Figma) then run without a card. Standing approvals:
+
+- never override a rule that asks for more than a normal card;
+- never apply to workflows marked "Requires approval";
+- are listed on the Approvals page, where any Admin or the person who gave
+  one can revoke it.
+
+**Expiry.** An action nobody approves within 24 hours is cancelled, and the
+room is told. Change the window with `ACTION_APPROVAL_TTL_HOURS` (1 to 720).
+Each card shows when it expires.
+
+**Who it runs as must still be allowed.** When an action is confirmed, the
+person it runs as must still be a member whose role may use that tool, so a
+removed or restricted requester's request can't be run in their name. "Run
+as me" also checks the approver's own role.
+
+**GitHub's own checks still apply.** For changes to a branch GitHub protects,
+the card shows what GitHub will also require, such as one approving review
+on pull requests into `main`. When the agent proposes a direct file change
+on a protected branch, it suggests a pull request instead. Nexus approval
+comes first, then GitHub's branch protection.
+
+Rule changes, blocked, expired and auto-approved actions, standing
+approvals and each individual approval are all logged in Activity. Rules live in the `approval_rules`
+table, individual approvals in `pending_action_approvals`, and standing
+approvals in `standing_approvals` (all from migration `0006_approval_rules.sql`).
 
 ## Tests
 
@@ -417,7 +503,8 @@ database, so you don't need one running. `packages/shared-types` is
 type-only; its "test" is `tsc` during `build`.
 
 The browser tests cover sign-up and sign-in, two-person live chat, approval
-cards (including Editors being unable to approve), workflows and GitHub
+cards (including Editors being unable to approve), approval rules (a
+two-approver rule set on the Approvals page), workflows and GitHub
 setup on the Integrations page. They run against a mock OpenAI-compatible
 model, so no model key or network access is needed. The first time on a
 machine, run `npx playwright install chromium`.

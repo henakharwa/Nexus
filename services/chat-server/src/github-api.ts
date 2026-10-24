@@ -13,6 +13,15 @@ export interface GithubTeamApi {
   getRepoAccess(token: string, owner: string, repo: string): Promise<RepoAccess>;
   listOpenIssues(token: string, owner: string, repo: string): Promise<Array<{ number: number; title: string; url: string }>>;
   createRepoWebhook(token: string, owner: string, repo: string, input: { url: string; secret: string; events: string[] }): Promise<{ id: number }>;
+  // Used by approval rules to know which branch an action lands on and what
+  // GitHub itself will require there. Optional: when missing, or when GitHub
+  // can't be asked, the branch counts as unknown (see approval-rules.ts).
+  /** The branch a pull request merges into. */
+  getPullRequestBase?(token: string, owner: string, repo: string, number: number): Promise<string | null>;
+  /** The repository's default branch. */
+  getDefaultBranch?(token: string, owner: string, repo: string): Promise<string | null>;
+  /** Whether GitHub protects a branch, and how many approving reviews its rules require (null when not visible to this token). */
+  getBranchProtection?(token: string, owner: string, repo: string, branch: string): Promise<{ protected: boolean; requiredReviews: number | null } | null>;
 }
 
 const API = "https://api.github.com";
@@ -98,6 +107,55 @@ export function createGithubTeamApi(fetchImpl: typeof fetch = fetch): GithubTeam
       if (!response.ok) return [];
       const issues = (await response.json()) as Array<{ number: number; title: string; html_url: string; pull_request?: unknown }>;
       return issues.filter((issue) => !issue.pull_request).map((issue) => ({ number: issue.number, title: issue.title, url: issue.html_url }));
+    },
+    async getPullRequestBase(token, owner, repo, number) {
+      try {
+        const response = await githubRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${number}`, { token, timeoutMs: 5000 }, fetchImpl);
+        if (!response.ok) return null;
+        return ((await response.json()) as { base?: { ref?: string } }).base?.ref ?? null;
+      } catch {
+        return null;
+      }
+    },
+    async getDefaultBranch(token, owner, repo) {
+      try {
+        const response = await githubRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { token, timeoutMs: 5000 }, fetchImpl);
+        if (!response.ok) return null;
+        return ((await response.json()) as { default_branch?: string }).default_branch ?? null;
+      } catch {
+        return null;
+      }
+    },
+    async getBranchProtection(token, owner, repo, branch) {
+      const base = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+      try {
+        // "protected" is visible to anyone who can read the repository.
+        const branchResponse = await githubRequest(`${base}/branches/${encodeURIComponent(branch)}`, { token, timeoutMs: 5000 }, fetchImpl);
+        if (!branchResponse.ok) return null;
+        const isProtected = Boolean(((await branchResponse.json()) as { protected?: boolean }).protected);
+        // Repository rulesets that apply to the branch are readable with read access.
+        let requiredReviews: number | null = null;
+        const rulesResponse = await githubRequest(`${base}/rules/branches/${encodeURIComponent(branch)}`, { token, timeoutMs: 5000 }, fetchImpl);
+        if (rulesResponse.ok) {
+          const rules = (await rulesResponse.json()) as Array<{ type?: string; parameters?: { required_approving_review_count?: number } }>;
+          for (const rule of rules) {
+            if (rule.type === "pull_request" && typeof rule.parameters?.required_approving_review_count === "number") {
+              requiredReviews = Math.max(requiredReviews ?? 0, rule.parameters.required_approving_review_count);
+            }
+          }
+        }
+        // Classic branch protection details need admin access; use them when visible.
+        if (isProtected) {
+          const reviewsResponse = await githubRequest(`${base}/branches/${encodeURIComponent(branch)}/protection/required_pull_request_reviews`, { token, timeoutMs: 5000 }, fetchImpl);
+          if (reviewsResponse.ok) {
+            const count = ((await reviewsResponse.json()) as { required_approving_review_count?: number }).required_approving_review_count;
+            if (typeof count === "number") requiredReviews = Math.max(requiredReviews ?? 0, count);
+          }
+        }
+        return { protected: isProtected || requiredReviews !== null, requiredReviews };
+      } catch {
+        return null;
+      }
     },
     async createRepoWebhook(token, owner, repo, input) {
       const response = await githubRequest(

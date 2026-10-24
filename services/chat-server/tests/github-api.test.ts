@@ -41,4 +41,39 @@ describe("github-api", () => {
     const api = createGithubTeamApi(impl);
     await expect(api.createRepoWebhook("t", "acme", "web", { url: "https://x", secret: "s", events: ["issues"] })).rejects.toThrow(/Disconnect GitHub, connect it again/);
   });
+
+  it("reads a pull request's base branch and the default branch, for approval rules", async () => {
+    const { impl } = fakeFetch({
+      "GET /repos/acme/web/pulls/7": { body: { base: { ref: "release/2.4" } } },
+      "GET /repos/acme/web": { body: { default_branch: "main", permissions: { push: true } } },
+    });
+    const api = createGithubTeamApi(impl);
+    expect(await api.getPullRequestBase!("t", "acme", "web", 7)).toBe("release/2.4");
+    expect(await api.getPullRequestBase!("t", "acme", "web", 8)).toBeNull();
+    expect(await api.getDefaultBranch!("t", "acme", "web")).toBe("main");
+  });
+
+  it("combines rulesets and visible classic protection into the reviews GitHub requires", async () => {
+    const { impl } = fakeFetch({
+      "GET /repos/acme/web/branches/main": { body: { name: "main", protected: true } },
+      "GET /repos/acme/web/rules/branches/main": { body: [{ type: "deletion" }, { type: "pull_request", parameters: { required_approving_review_count: 1 } }] },
+      "GET /repos/acme/web/branches/main/protection/required_pull_request_reviews": { body: { required_approving_review_count: 2 } },
+      "GET /repos/acme/web/branches/dev": { body: { name: "dev", protected: false } },
+      "GET /repos/acme/web/rules/branches/dev": { body: [] },
+    });
+    const api = createGithubTeamApi(impl);
+    expect(await api.getBranchProtection!("t", "acme", "web", "main")).toEqual({ protected: true, requiredReviews: 2 });
+    expect(await api.getBranchProtection!("t", "acme", "web", "dev")).toEqual({ protected: false, requiredReviews: null });
+    // A branch GitHub won't show: unknown, not "unprotected".
+    expect(await api.getBranchProtection!("t", "acme", "web", "ghost")).toBeNull();
+  });
+
+  it("still reports protection when classic protection details need admin access", async () => {
+    const { impl } = fakeFetch({
+      "GET /repos/acme/web/branches/main": { body: { name: "main", protected: true } },
+      "GET /repos/acme/web/rules/branches/main": { body: [] },
+    });
+    const api = createGithubTeamApi(impl);
+    expect(await api.getBranchProtection!("t", "acme", "web", "main")).toEqual({ protected: true, requiredReviews: null });
+  });
 });

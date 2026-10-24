@@ -1,4 +1,7 @@
 import type {
+  ApprovalRule,
+  ApprovalRuleInput,
+  StandingApproval,
   AuditEvent,
   AuditEventType,
   ChatMessage,
@@ -859,14 +862,19 @@ export async function confirmAction(
   workspaceId: string,
   actionId: string,
   actorName: string,
-  options: { runAs?: "me" } = {},
+  // remember: also approve similar actions for 7 days (a standing approval).
+  options: { runAs?: "me"; remember?: boolean } = {},
 ): Promise<PendingAction> {
   const res = await authenticatedFetch(
     `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/actions/${encodeURIComponent(actionId)}/confirm`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ actorName, ...(options.runAs ? { runAs: options.runAs } : {}) }),
+      body: JSON.stringify({
+        actorName,
+        ...(options.runAs ? { runAs: options.runAs } : {}),
+        ...(options.remember ? { remember: true } : {}),
+      }),
     },
   );
   return (await parseJsonOrThrow(res)) as PendingAction;
@@ -1095,4 +1103,65 @@ export async function listWorkspaceWorkflowRuns(
   return (await parseJsonOrThrow(res)) as Array<
     import("@mai-chat/shared-types").WorkflowRun & { workflowName: string }
   >;
+}
+
+// -- Approval rules (services/chat-server/src/routes/approval-rules.ts) --
+
+export async function listApprovalRules(workspaceId: string): Promise<ApprovalRule[]> {
+  const res = await authenticatedFetch(workspaceUrl(workspaceId, "/approval-rules"));
+  return (await parseJsonOrThrow(res)) as ApprovalRule[];
+}
+
+export async function createApprovalRule(workspaceId: string, input: ApprovalRuleInput): Promise<ApprovalRule> {
+  const res = await authenticatedFetch(workspaceUrl(workspaceId, "/approval-rules"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return (await parseJsonOrThrow(res)) as ApprovalRule;
+}
+
+export async function updateApprovalRule(
+  workspaceId: string,
+  ruleId: string,
+  input: ApprovalRuleInput,
+): Promise<ApprovalRule> {
+  const res = await authenticatedFetch(workspaceUrl(workspaceId, `/approval-rules/${encodeURIComponent(ruleId)}`), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return (await parseJsonOrThrow(res)) as ApprovalRule;
+}
+
+export async function deleteApprovalRule(workspaceId: string, ruleId: string): Promise<void> {
+  const res = await authenticatedFetch(workspaceUrl(workspaceId, `/approval-rules/${encodeURIComponent(ruleId)}`), {
+    method: "DELETE",
+  });
+  if (!res.ok) await parseJsonOrThrow(res);
+}
+
+/** How many members can approve actions (for "this rule can't be satisfied" warnings). */
+export async function getApprovalCapacity(workspaceId: string): Promise<{ approvers: number }> {
+  const res = await authenticatedFetch(workspaceUrl(workspaceId, "/approval-rules/capacity"));
+  return (await parseJsonOrThrow(res)) as { approvers: number };
+}
+
+/** Adds the recommended starter rules (skips any that already exist by name). */
+export async function addStarterApprovalRules(workspaceId: string): Promise<ApprovalRule[]> {
+  const res = await authenticatedFetch(workspaceUrl(workspaceId, "/approval-rules/starter"), { method: "POST" });
+  return (await parseJsonOrThrow(res)) as ApprovalRule[];
+}
+
+export async function listStandingApprovals(workspaceId: string): Promise<StandingApproval[]> {
+  const res = await authenticatedFetch(workspaceUrl(workspaceId, "/standing-approvals"));
+  return (await parseJsonOrThrow(res)) as StandingApproval[];
+}
+
+export async function revokeStandingApproval(workspaceId: string, approvalId: string): Promise<void> {
+  const res = await authenticatedFetch(
+    workspaceUrl(workspaceId, `/standing-approvals/${encodeURIComponent(approvalId)}`),
+    { method: "DELETE" },
+  );
+  if (!res.ok) await parseJsonOrThrow(res);
 }

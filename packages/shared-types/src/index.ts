@@ -679,6 +679,86 @@ export interface PendingAction {
   warnings?: ActionWarning[];
   executedAsUserId?: string | null;
   executedAsAccount?: string | null;
+  // Approval rules (services/chat-server/src/approval-rules.ts). How many
+  // approvals the action needs (1 unless a rule asks for more), the rule
+  // that decided it, and who has approved so far.
+  requiredApprovals?: number;
+  approvalRuleId?: string | null;
+  approvalRuleName?: string | null;
+  // True when a rule approved it with no human decision.
+  autoApproved?: boolean;
+  approvals?: PendingActionApproval[];
+  // False for workflows marked "Requires approval": no rule or standing
+  // approval may approve it, so the card doesn't offer one.
+  autoApproveAllowed?: boolean;
+  // When the action stops waiting and is cancelled (ACTION_APPROVAL_TTL_HOURS, 24 by default).
+  expiresAt?: string;
+}
+
+// An approver's "approve this kind of action for this target" from an
+// approval card, valid for a limited time. Applies only where no approval
+// rule asks for more than a normal card.
+export interface StandingApproval {
+  id: string;
+  workspaceId: string;
+  provider: IntegrationType;
+  toolName: string;
+  scope: string;
+  // e.g. "acme/web", "#announcements", "Linear"
+  scopeLabel: string;
+  // e.g. "add issue comment on acme/web"
+  description: string;
+  createdByUserId: string | null;
+  createdByName: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface PendingActionApproval {
+  userId: string;
+  name: string;
+  approvedAt: string;
+}
+
+// -- Approval rules -----------------------------------------------------
+// Admin-defined policy for agent-proposed writes. A rule matches on tool,
+// action type, repository, branch and Slack channel; when several match,
+// the strictest wins: block, then the most approvals, then a normal
+// approval card, then auto-approve.
+
+export type ApprovalRuleEffect = "auto_approve" | "require_approvals" | "block";
+
+export type ApprovalActionCategory = "create" | "comment" | "update" | "merge" | "file_change" | "branch" | "delete" | "message" | "other";
+
+export interface ApprovalRule {
+  id: string;
+  workspaceId: string;
+  name: string;
+  enabled: boolean;
+  // Null matches every tool.
+  provider: IntegrationType | null;
+  // Empty matches every action type.
+  categories: ApprovalActionCategory[];
+  // Comma-separated glob patterns, e.g. "acme/*" or "main, release/*". Null matches everything.
+  repoPattern: string | null;
+  branchPattern: string | null;
+  channelPattern: string | null;
+  effect: ApprovalRuleEffect;
+  // Set when effect is "require_approvals": approvals needed from people other than the requester (1-5).
+  requiredApprovals: number | null;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ApprovalRuleInput = Pick<ApprovalRule, "name" | "enabled" | "provider" | "categories" | "repoPattern" | "branchPattern" | "channelPattern" | "effect" | "requiredApprovals">;
+
+export interface ApprovalDecision {
+  // "default": no rule changed anything, so one approval from anyone allowed to approve.
+  effect: ApprovalRuleEffect | "default";
+  requiredApprovals: number;
+  ruleId: string | null;
+  ruleName: string | null;
 }
 
 export interface ActionTarget {
@@ -694,6 +774,13 @@ export interface ActionTarget {
   path?: string;
   branch?: string;
   channel?: string;
+  // Slack: the channel's name when the action names it by ID, so rules can match either.
+  channelName?: string;
+  // GitHub: the branch a pull request merges into, looked up for merges and PR updates.
+  baseBranch?: string;
+  // GitHub: what the repository's own branch protection requires on the
+  // branch this action changes, shown on the card (Nexus approval comes first, then GitHub's).
+  branchProtection?: { branch: string; protected: boolean; requiredReviews: number | null };
 }
 
 export interface ActionWarning {
@@ -770,6 +857,17 @@ export type AuditEventType =
   | "action.confirmed"
   | "action.cancelled"
   | "action.failed"
+  // Approval rules: one approval recorded on an action that needs several,
+  // an action a rule ran without a human decision, and one a rule refused.
+  | "action.approved"
+  | "action.auto_approved"
+  | "action.blocked"
+  | "action.expired"
+  | "standing_approval.created"
+  | "standing_approval.revoked"
+  | "approval_rule.created"
+  | "approval_rule.updated"
+  | "approval_rule.deleted"
   // Logged whenever a message @-mentions one or more teammates without
   // also @-mentioning the agent -- see mentions_agent's sql/migrations/0001_baseline.sql
   // comment. Gives "who's driving this" a durable, searchable trail
