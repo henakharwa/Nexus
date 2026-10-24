@@ -1,44 +1,69 @@
 # Nexus -- shared agentic workspace
 
-A shared group-chat workspace where a team and an AI teammate read GitHub and
-Slack together, live, in one channel. This is a from-scratch rebuild of the
-"Multiplayer AI" idea -- not the earlier CRDT collaborative-editor prototype,
+A shared group-chat workspace where a team and an AI teammate work across
+GitHub, Slack, Linear, Notion and Figma together, live, in one channel. The
+web app is branded **Nexus**. This is a from-scratch rebuild of the
+"Multiplayer AI" idea, not the earlier CRDT collaborative-editor prototype,
 which this replaces.
 
-See `docs/spec.md` for the current product spec (idea, what's built, Phase 2 plan). The original spec for the retired prototype is kept for reference at `docs/archive/Multiplayer AI — Problem Statement, Scope & Feature Spec.pdf`.
+See `docs/spec.md` for the product spec. The original spec for the retired prototype is kept for reference at `docs/archive/Multiplayer AI — Problem Statement, Scope & Feature Spec.pdf`.
 
-**Known leftover:** `apps/vscode-extension/`, `services/sync-server/`, and `sample-repo/` are empty directories left over from the retired prototype. They aren't part of the npm workspace and contain nothing, but this session's file tools couldn't remove them (Permission denied on rmdir, likely an OneDrive placeholder/sync lock on those specific folders) — safe to delete by hand in File Explorer whenever convenient.
+**What's built:**
+- **Shared live chat.** Each workspace has shared conversations over
+  WebSocket: everyone sees the same thread, presence list and agent replies.
+  Messages render as Markdown, and members can @-mention and hand off to each
+  other.
+- **An agent that reads and acts across your tools.** It can read and
+  summarize GitHub (issues, PRs, commits, files, Actions), Slack (channels,
+  threads, search), Linear, Notion (pages and database rows) and Figma
+  (a team's projects and files, file contents, comments). It can also **write**: comment on or
+  open a PR, push a commit, create a branch or issue, post to Slack, append to
+  a Notion page, and so on. Every write becomes an approval card that an Admin
+  must confirm before anything happens (`services/chat-server/src/actions.ts`).
+- **Accounts and workspaces.** Sign in with email + password, GitHub or
+  Google. Create a workspace, or join one with a shareable link or code.
+- **Roles.** Each member is an **Admin** or an **Editor**. See "Workspace
+  roles" below.
+- **One GitHub repository per member.** Each member connects their own GitHub
+  account and picks the one repository they work in. The agent acts there as
+  that member and refuses requests aimed at other repositories. Proposed
+  changes flag duplicates and conflicts with teammates' work, and GitHub
+  webhook events feed the activity feed, live updates and workflow triggers
+  (`services/chat-server/src/github-team.ts`). If GitHub rejects a member's
+  saved token, they're asked to reconnect.
+- **Workspace pages** (`apps/web/app/w/[id]/`): Overview, Tasks (a board with
+  owners and due dates), Workflows (manual, scheduled, GitHub issue/status and
+  Slack-mention triggers), Agents, Artifacts, Memory, Notifications,
+  Activity/audit log, Observability and Integrations.
+- **Limits.** A message length limit, and a cap on agent turns per person per
+  hour (`AGENT_TURNS_PER_USER_PER_HOUR`, default 60).
 
-**Phase 1 scope (what's built):**
-- One shared group chat per workspace, in real time over WebSocket.
-- Everyone in a workspace sees the same message thread and presence list.
-- The agent can **read and summarize** GitHub (issues, PRs, commits) and
-  Slack (channels, message history) that a workspace connects, and can also
-  **write** to both -- comment on/open a GitHub PR, push a commit, create a
-  branch or issue, or post a Slack message -- gated behind a confirmation
-  card a human must approve before anything actually happens (see
-  `services/chat-server/src/actions.ts`).
-- GitHub-authenticated workspaces with shareable join links (see "Scope decisions"
-  below for why). Every tool -- GitHub, Slack, Linear, Notion and Figma --
-  connects only through its own OAuth login; there is no pasted-token
-  option.
+Every tool connects only through its own OAuth login. There is no option to
+paste a token.
 
 ## Architecture
 
 npm workspaces monorepo:
 
 - `packages/shared-types` -- the TypeScript contract every other package imports.
-- `packages/db` -- Postgres schema + typed CRUD (`workspaces`, `messages`,
-  `integrations`). Integration tokens are encrypted at rest (AES-256-GCM).
-- `packages/integrations` -- a real GitHub (`@octokit/rest`) client, used
-  only to verify a pasted PAT before saving it. Slack has no equivalent
-  package here anymore -- its tools come entirely from Slack's own
-  official MCP server, see "Slack tools via MCP server" below.
-- `services/chat-server` -- Express REST API + a WebSocket server for the
-  live chat, and the LLM tool-calling agent loop (OpenAI-compatible
-  `/chat/completions`, currently pointed at Groq's free tier).
-- `apps/web` -- the Next.js site: create/join a workspace, the chat room,
-  and the integrations settings page.
+- `packages/db` -- Postgres schema (versioned migrations in
+  `sql/migrations`) + typed CRUD for workspaces, members, conversations,
+  messages, integrations, pending actions, tasks, workflows, notifications
+  and more. Integration tokens are encrypted at rest (AES-256-GCM).
+- `packages/integrations` -- thin GitHub (`@octokit/rest`) and Slack
+  (`@slack/web-api`) clients the chat-server uses for direct API calls, such
+  as listing the repositories a member's GitHub login can reach. The agent's
+  own GitHub and Slack tools come from their official MCP servers (see
+  below).
+- `services/chat-server` -- Express REST API (`src/routes/`) + a WebSocket
+  server for the live chat, the OAuth flows, and the LLM tool-calling agent
+  loop. The agent talks to any OpenAI-compatible `/chat/completions`
+  endpoint. The default is a local Ollama model, with Groq, Cerebras or a
+  paid primary model as options (see `.env.example`).
+- `apps/web` -- the Next.js site: landing page, sign-in, dashboard, the chat
+  room and the other workspace pages, plus email verification and password
+  reset pages.
+- `e2e/` -- Playwright browser tests (see "Tests").
 
 Every package that talks to something external (the LLM, GitHub, Slack)
 takes that dependency as an injectable parameter, so the test suites
@@ -78,9 +103,11 @@ npm run dev:web          # starts the website on :3000
 Open **http://localhost:3000**, create a workspace, open the same URL (or
 use the join code) in a second browser/incognito window as a second person,
 and chat -- you'll see each other's messages and the agent's replies live.
-From the workspace's "Integrations settings" page you can log in with
-GitHub, Slack, Linear, Notion or Figma. Each tool connects through its own
-OAuth login only.
+From the workspace's Integrations page you can log in with GitHub, Slack,
+Linear, Notion or Figma. Each needs its own OAuth app registered first (see
+the sections below). Email + password sign-in works with no setup at all.
+
+To wipe the local database and start over, run `npm run db:reset`.
 
 `.env` is set up to run the agent against a local, free, open-source model
 by default -- see the next section for the one-time setup. If you'd rather
@@ -229,10 +256,14 @@ dialog (`apps/web/app/_components/AuthForm.tsx`):
   per-account rate limiting (`GET /auth/providers` reports which methods
   are actually configured, so the UI never shows a broken provider
   button).
-- **GitHub OAuth** -- see the OAuth App setup earlier in this section
-  (`GITHUB_OAUTH_CLIENT_ID`/`GITHUB_OAUTH_CLIENT_SECRET`); the same App
-  used for the GitHub integration also handles sign-in, distinguished by a
-  `login:`-prefixed OAuth state on the shared `/auth/github/callback` URL.
+- **GitHub OAuth** -- one GitHub OAuth App handles both sign-in and the
+  GitHub integration. Register it at <https://github.com/settings/developers>
+  with Homepage URL `http://localhost:3000` and **both** of these
+  callback URLs:
+  `http://localhost:4000/auth/github/callback` (integration) and
+  `http://localhost:4000/auth/login/github/callback` (sign-in). Then paste
+  its Client ID and Client Secret into `.env` as
+  `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`.
 - **Google OAuth** (`services/chat-server/src/google-auth.ts`), PKCE +
   `state` verified with a browser-bound cookie, identity taken only from
   Google's authenticated `userinfo` endpoint with `email_verified: true`
@@ -260,6 +291,13 @@ Creating or joining a workspace, opening a shared workspace link, and using
 workspace APIs or chat all require a valid session. Workspace names and
 join codes entered before login are preserved on return. Sessions use
 HTTP-only cookies (30-day expiry) and can be revoked through Sign Out.
+
+**Email delivery.** Password-reset and verification emails go through
+Resend (`RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`) or Gmail (SMTP app password
+or Gmail API credentials). With none set, which is fine for local
+development, the email and its link are printed in the chat-server's
+terminal instead. Email verification is controlled by
+`EMAIL_VERIFICATION_ENABLED`; when it's off, no verification emails are sent.
 
 ## Slack tools via MCP server
 
@@ -331,61 +369,99 @@ reason, check the chat-server's own terminal -- `slack-oauth.ts` logs
 Slack's raw token-endpoint response there, which is the fastest way to
 spot what's actually wrong.
 
+## Linear, Notion and Figma
+
+These connect the same way, through `services/chat-server/src/provider-oauth.ts`.
+For each tool you want, register an OAuth app with that provider, set its
+redirect URL to `http://localhost:4000/auth/mcp/<provider>/callback`
+(`linear`, `notion` or `figma`), and put its credentials in `.env`:
+
+| Tool | `.env` variables | What the agent gets |
+|---|---|---|
+| Linear | `LINEAR_OAUTH_CLIENT_ID`, `LINEAR_OAUTH_CLIENT_SECRET` | Linear's official MCP server (`mcp.linear.app`) |
+| Notion | `NOTION_OAUTH_CLIENT_ID`, `NOTION_OAUTH_CLIENT_SECRET` | Notion REST API: read pages and database rows, append text to pages (`notion-tools.ts`) |
+| Figma | `FIGMA_OAUTH_CLIENT_ID`, `FIGMA_OAUTH_CLIENT_SECRET` | Figma REST API: browse a team's projects, find files by name, read files and their comments, post comments (`figma-tools.ts`) |
+
+Figma's scopes can be overridden with `FIGMA_OAUTH_SCOPES`. After connecting
+Figma, set the Figma team from the Integrations page so the agent can browse
+its projects. A tool whose credentials are blank just can't be connected;
+everything else keeps working.
+
+## Workspace roles
+
+Every member is an **Admin** or an **Editor**. The workspace creator starts
+as an Admin, and invites say which role a new member gets.
+
+- **Admins** approve or cancel the agent's proposed writes, manage members
+  and roles, archive and delete conversations (logged in Activity), and can
+  take over workflows whose owner left.
+- **Editors** chat with the agent and teammates, and use tasks, workflows,
+  memory and artifacts, but can't approve writes.
+- A workspace always keeps at least one Admin.
+
+The full matrix is in `docs/Nexus Role Access Matrix.docx`.
 
 ## Tests
 
 ```sh
-npm run test
+npm run test             # every package's suite, against DATABASE_URL
+npm run test:full        # the same, against a throwaway local Postgres
+npm run test:e2e         # Playwright browser tests (see e2e/README.md)
 ```
 
-Runs every package's suite (`packages/db`, `packages/integrations`,
-`services/chat-server`) against a real Postgres and real dependency-injected
-mocks for GitHub/Slack/the LLM call -- see the "Architecture" note above.
-`packages/shared-types` is type-only; its "test" is `tsc` during `build`.
+`npm run test` runs every workspace's suite (`packages/db`,
+`packages/integrations`, `services/chat-server`, `apps/web`) against a real
+Postgres, with dependency-injected mocks only for the external network calls
+(GitHub, Slack, the LLM). `npm run test:full` starts and stops its own
+database, so you don't need one running. `packages/shared-types` is
+type-only; its "test" is `tsc` during `build`.
 
-## Scope decisions (Phase 1)
+The browser tests cover sign-up and sign-in, two-person live chat, approval
+cards (including Editors being unable to approve), workflows and GitHub
+setup on the Integrations page. They run against a mock OpenAI-compatible
+model, so no model key or network access is needed. The first time on a
+machine, run `npx playwright install chromium`.
 
-A few things were deliberately simplified to ship a genuinely working,
-fully-tested product quickly rather than a half-built bigger one:
+CI (`.github/workflows/ci.yml`) runs on every push and pull request: a
+formatting check (`npm run format:check`), migrations, the full test suite,
+a build of every workspace, and the browser tests. Dependabot keeps
+dependencies up to date.
 
-- **Authenticated join-link workspaces.** A GitHub account is required before creating or joining a workspace. A shared link or code still grants access once signed in; role-based permissions remain deferred.
-- **OAuth only, for every tool.** GitHub connects through a real OAuth
-  login (`services/chat-server/src/github-oauth.ts`); Linear, Notion and
-  Figma through `services/chat-server/src/provider-oauth.ts`. Tokens are
-  encrypted at rest and never pasted by hand. Slack connects via OAuth
-  (`services/chat-server/src/slack-oauth.ts`) -- Slack's own official MCP
-  server (see "Slack tools via MCP server" above) requires a real user
-  access token from that exact flow, so a hand-pasted bot token (what this
-  project used before switching Slack's tools to that MCP server) could
-  never authenticate to it.
-- **Read AND write, gated by human confirmation.** The agent can look
-  things up on GitHub/Slack, and can also act (comment/open a PR/push a
-  commit/create an issue or branch on GitHub, post a message on Slack) --
-  every write queues a confirmation card in the chat instead of running
+## Scope decisions
+
+- **Sign-in required, join by link.** Creating or joining a workspace needs
+  an account (email, GitHub or Google). A shared link or code grants access
+  once signed in, with the role the invite specifies.
+- **OAuth only, for every tool.** GitHub connects through
+  `services/chat-server/src/github-oauth.ts`; Slack through
+  `services/chat-server/src/slack-oauth.ts` (Slack's MCP server only accepts
+  a user token from that exact flow); Linear, Notion and Figma through
+  `services/chat-server/src/provider-oauth.ts`. Tokens are encrypted at rest
+  and never pasted by hand.
+- **One repository per member, no GitHub App.** Each member's GitHub
+  connection points at the one repository they chose, and the agent acts
+  there as that member. The earlier workspace repository list and workspace
+  GitHub App were removed (migration
+  `0005_one_repository_per_member.sql`).
+- **Read AND write, gated by human confirmation.** Every write the agent
+  proposes queues an approval card in the chat instead of running
   immediately; see `services/chat-server/src/actions.ts`.
 
 ## What's verified, and how
 
-- Every package's automated test suite runs against a real local Postgres,
-  with only the external network call (GitHub/Slack API, the LLM call)
-  swapped for a scripted mock in each specific test -- never the surrounding
-  logic.
-- The whole system was additionally verified with real Playwright browser
-  automation: two independent browser contexts (two "people") creating and
-  joining the same workspace through the real website, seeing each other's
-  messages and the agent's reply live over WebSocket, chat history
-  surviving a reload (proving it's persisted, not just in-memory), and a
-  bad GitHub token being rejected by the real GitHub API.
-- That Playwright pass ran with the LLM call scripted rather than hitting
-  Groq for real, because the verification sandbox's network policy blocks
-  outbound access to `api.groq.com` -- a sandbox limitation, not a product
-  one. `services/chat-server/tests/agent.test.ts` covers the real
-  tool-calling loop against a scripted LLM response in detail, and the same
-  Groq key already works from a normal internet connection (this repo
-  reuses a key that was verified working in this project's earlier build).
-- The whole monorepo was also rebuilt and re-tested from a fresh checkout
-  (fresh `npm install`, fresh database) before being copied here, to catch
-  anything that only worked by accident of leftover local state.
+- Every package's automated test suite runs against a real Postgres, with
+  only the external network call (GitHub/Slack API, the LLM call) swapped
+  for a scripted mock in each specific test, never the surrounding logic.
+  `services/chat-server/tests/agent.test.ts` covers the real tool-calling
+  loop in detail.
+- The Playwright suite in `e2e/` drives the real website in Chromium: two
+  independent browser contexts (two people) in the same workspace, seeing
+  each other's messages and the agent's reply live over WebSocket, plus
+  sign-in, approvals and workflows. It uses a mock model instead of a real
+  LLM, and inserts approval cards directly because a test run has no real
+  GitHub or Slack account to write to.
+- The Slack OAuth + MCP flow was verified live against a real Slack app on
+  2026-09-21 (see "Slack tools via MCP server").
 
 ## Database migrations
 
@@ -395,3 +471,29 @@ Schema changes live in `packages/db/sql/migrations` as numbered files (`0001_bas
 - Make it reversible: add `0002_add_task_labels.down.sql` next to it.
 - See what has run: `npm run migrate:status --workspace=packages/db`.
 - Undo the latest: `npm run migrate:down --workspace=packages/db` (needs its `.down.sql`).
+
+## Error tracking (optional)
+
+Set `SENTRY_DSN` (chat server) and/or `NEXT_PUBLIC_SENTRY_DSN` (browser,
+read when the web app is built) to send errors to Sentry. With no DSN,
+nothing is loaded or sent. Reports never include cookies, headers, request
+bodies, query strings, chat content or local variables.
+
+## Deployment
+
+- **Oracle Cloud** (single VM, Docker Compose with Caddy in front):
+  `docs/deploy-oracle-cloud.md`, using `Dockerfile.nexus`,
+  `docker-compose.oracle.yml`, `Caddyfile.oracle` and
+  `.env.oracle.example`.
+- **Railway:** `docs/deploy-railway.md`, including every OAuth callback URL
+  to register.
+- **Production secrets and health checks:**
+  `docs/production-secrets-and-health.md`.
+
+With `NODE_ENV=production`, the chat server refuses to start without
+`DATABASE_URL`, `INTEGRATION_ENCRYPTION_KEY` and a non-localhost
+`WEB_APP_URL` (`services/chat-server/src/config-check.ts`). Behind a proxy,
+set `TRUST_PROXY_HOPS` so per-IP limits see real client addresses. To run
+several chat-server processes, `REALTIME_BUS=postgres` (the production
+default) shares live events and the one-agent-turn lock through the
+database.
