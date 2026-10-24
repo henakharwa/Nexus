@@ -1,4 +1,4 @@
-# Multiplayer AI -- shared agentic chat
+# Nexus -- shared agentic workspace
 
 A shared group-chat workspace where a team and an AI teammate read GitHub and
 Slack together, live, in one channel. This is a from-scratch rebuild of the
