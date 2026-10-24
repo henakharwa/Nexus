@@ -1,4 +1,5 @@
 # Nexus -- shared agentic workspace
+Website - https://nexus-work.duckdns.org/
 
 A shared group-chat workspace where a team and an AI teammate work across
 GitHub, Slack, Linear, Notion and Figma together, live, in one channel. The
