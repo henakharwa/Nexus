@@ -6,20 +6,38 @@ import { closePool } from "@mai-chat/db";
 import { setupDatabase, makeUser, newApp, makeWorkspace, grantEditor, NIL_UUID, type TestUser } from "./helpers.js";
 
 const app = newApp();
-let admin: TestUser; let editor: TestUser; let outsider: TestUser;
+let admin: TestUser;
+let editor: TestUser;
+let outsider: TestUser;
 let ws: Awaited<ReturnType<typeof makeWorkspace>>;
 beforeAll(async () => {
   await setupDatabase();
-  admin = await makeUser("Admin"); editor = await makeUser("Editor"); outsider = await makeUser("Outsider");
+  admin = await makeUser("Admin");
+  editor = await makeUser("Editor");
+  outsider = await makeUser("Outsider");
   ws = await makeWorkspace(app, admin, [editor]);
 });
-afterAll(async () => { await closePool(); });
+afterAll(async () => {
+  await closePool();
+});
 
 const as = (user: TestUser) => ({
   get: (path: string) => request(app).get(path).set("Cookie", user.cookie),
-  post: (path: string, body?: object) => request(app).post(path).set("Cookie", user.cookie).send(body ?? {}),
-  put: (path: string, body?: object) => request(app).put(path).set("Cookie", user.cookie).send(body ?? {}),
-  patch: (path: string, body?: object) => request(app).patch(path).set("Cookie", user.cookie).send(body ?? {}),
+  post: (path: string, body?: object) =>
+    request(app)
+      .post(path)
+      .set("Cookie", user.cookie)
+      .send(body ?? {}),
+  put: (path: string, body?: object) =>
+    request(app)
+      .put(path)
+      .set("Cookie", user.cookie)
+      .send(body ?? {}),
+  patch: (path: string, body?: object) =>
+    request(app)
+      .patch(path)
+      .set("Cookie", user.cookie)
+      .send(body ?? {}),
   delete: (path: string) => request(app).delete(path).set("Cookie", user.cookie),
 });
 
@@ -30,10 +48,34 @@ describe("PM-01 effective access", () => {
     expect(Object.values(a.body.permissions).every(Boolean)).toBe(true);
     const e = await as(editor).get(`/workspaces/${ws.id}/access`);
     expect(e.body.role).toBe("editor");
-    expect(e.body.permissions).toMatchObject({ createAgents: false, publishAgents: false, manageWorkflows: false, manageMemory: true, manageArtifacts: true, approveActions: false, connectTools: true });
+    expect(e.body.permissions).toMatchObject({
+      createAgents: false,
+      publishAgents: false,
+      manageWorkflows: false,
+      manageMemory: true,
+      manageArtifacts: true,
+      approveActions: false,
+      connectTools: true,
+    });
   });
   it("security: outsiders get 403 on every shared read", async () => {
-    for (const path of ["access", "members", "permissions", "tasks", "memory", "artifacts", "agents", "workflows", "workflow-runs", "integrations", "audit", "conversations", "observability/retention"]) {
+    for (const path of [
+      "access",
+      "members",
+      "permissions",
+      "tasks",
+      "memory",
+      "artifacts",
+      "agents",
+      "workflows",
+      "workflow-runs",
+      "integrations",
+      "audit",
+      "conversations",
+      "observability/retention",
+      "join-policy",
+      "join-requests",
+    ]) {
       expect((await as(outsider).get(`/workspaces/${ws.id}/${path}`)).status, path).toBe(403);
     }
   });
@@ -45,6 +87,8 @@ describe("PM-02 Admin-only features", () => {
       await as(editor).put(`/workspaces/${ws.id}/permissions`, { admin: {}, editor: { createAgents: true } }),
       await as(editor).get(`/workspaces/${ws.id}/permission-requests`),
       await as(editor).get(`/workspaces/${ws.id}/invitations`),
+      await as(editor).get(`/workspaces/${ws.id}/join-requests`),
+      await as(editor).put(`/workspaces/${ws.id}/join-policy`, { approvalRequired: true }),
       await as(editor).post(`/workspaces/${ws.id}/invitations`, { email: "x@example.test", role: "editor" }),
       await as(editor).put(`/workspaces/${ws.id}/observability/retention`, { retentionDays: 7 }),
       await as(editor).patch(`/workspaces/${ws.id}/members/${admin.id}`, { role: "editor" }),
@@ -54,7 +98,10 @@ describe("PM-02 Admin-only features", () => {
   });
   it("basic: Admin saves the Editor policy and the Editor sees it immediately", async () => {
     const current = (await as(admin).get(`/workspaces/${ws.id}/permissions`)).body;
-    const saved = await as(admin).put(`/workspaces/${ws.id}/permissions`, { admin: current.admin, editor: { ...current.editor, createAgents: true } });
+    const saved = await as(admin).put(`/workspaces/${ws.id}/permissions`, {
+      admin: current.admin,
+      editor: { ...current.editor, createAgents: true },
+    });
     expect(saved.status).toBe(200);
     expect((await as(editor).get(`/workspaces/${ws.id}/access`)).body.permissions.createAgents).toBe(true);
     await as(admin).put(`/workspaces/${ws.id}/permissions`, current);
@@ -62,13 +109,19 @@ describe("PM-02 Admin-only features", () => {
   it("edge: a policy body missing admin or editor is a 400; unknown keys are dropped", async () => {
     expect((await as(admin).put(`/workspaces/${ws.id}/permissions`, { editor: {} })).status).toBe(400);
     const current = (await as(admin).get(`/workspaces/${ws.id}/permissions`)).body;
-    const saved = await as(admin).put(`/workspaces/${ws.id}/permissions`, { admin: current.admin, editor: { ...current.editor, superUser: true } });
+    const saved = await as(admin).put(`/workspaces/${ws.id}/permissions`, {
+      admin: current.admin,
+      editor: { ...current.editor, superUser: true },
+    });
     expect(saved.status).toBe(200);
     expect(saved.body.editor).not.toHaveProperty("superUser");
   });
   it("edge: Admins cannot be stripped of their own permissions through the policy", async () => {
     const current = (await as(admin).get(`/workspaces/${ws.id}/permissions`)).body;
-    await as(admin).put(`/workspaces/${ws.id}/permissions`, { admin: { ...current.admin, createAgents: false }, editor: current.editor });
+    await as(admin).put(`/workspaces/${ws.id}/permissions`, {
+      admin: { ...current.admin, createAgents: false },
+      editor: current.editor,
+    });
     expect((await as(admin).get(`/workspaces/${ws.id}/access`)).body.permissions.createAgents).toBe(true);
     await as(admin).put(`/workspaces/${ws.id}/permissions`, current);
   });
@@ -120,31 +173,74 @@ describe("PM-03 conditional Editor features", () => {
 
 describe("PM-04 permission requests", () => {
   it("basic: Editor asks, Admin approves, Editor gains the permission and is notified", async () => {
-    const asked = await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "approveActions", reason: "I review deploys" });
+    const asked = await as(editor).post(`/workspaces/${ws.id}/permission-requests`, {
+      permission: "approveActions",
+      reason: "I review deploys",
+    });
     expect(asked.status).toBe(201);
     const pending = await as(admin).get(`/workspaces/${ws.id}/permission-requests`);
     expect(pending.body.some((r: { id: string }) => r.id === asked.body.id)).toBe(true);
-    expect((await as(admin).post(`/workspaces/${ws.id}/permission-requests/${asked.body.id}/approve`)).status).toBe(204);
+    expect((await as(admin).post(`/workspaces/${ws.id}/permission-requests/${asked.body.id}/approve`)).status).toBe(
+      204,
+    );
     expect((await as(editor).get(`/workspaces/${ws.id}/access`)).body.permissions.approveActions).toBe(true);
     const notes = await as(editor).get(`/notifications?workspaceId=${ws.id}`);
     expect(JSON.stringify(notes.body)).toMatch(/approved your request for approveActions/);
     await grantEditor(ws.id, { approveActions: false });
   });
   it("basic: Admin rejects; the permission stays off and the request cannot be decided twice", async () => {
-    const asked = await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "publishAgents", reason: "Ship my agent" });
+    const asked = await as(editor).post(`/workspaces/${ws.id}/permission-requests`, {
+      permission: "publishAgents",
+      reason: "Ship my agent",
+    });
     expect((await as(admin).post(`/workspaces/${ws.id}/permission-requests/${asked.body.id}/reject`)).status).toBe(204);
     expect((await as(editor).get(`/workspaces/${ws.id}/access`)).body.permissions.publishAgents).toBe(false);
-    expect((await as(admin).post(`/workspaces/${ws.id}/permission-requests/${asked.body.id}/approve`)).status).toBe(404);
+    expect((await as(admin).post(`/workspaces/${ws.id}/permission-requests/${asked.body.id}/approve`)).status).toBe(
+      404,
+    );
   });
   it("edge: invalid permission, missing/oversized reason, already-held permission", async () => {
-    expect((await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "root", reason: "x" })).status).toBe(400);
-    expect((await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "createAgents", reason: "   " })).status).toBe(400);
-    expect((await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "createAgents", reason: "x".repeat(1001) })).status).toBe(400);
-    expect((await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "connectTools", reason: "Already have it" })).status).toBe(409);
+    expect(
+      (await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "root", reason: "x" })).status,
+    ).toBe(400);
+    expect(
+      (await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "createAgents", reason: "   " }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await as(editor).post(`/workspaces/${ws.id}/permission-requests`, {
+          permission: "createAgents",
+          reason: "x".repeat(1001),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await as(editor).post(`/workspaces/${ws.id}/permission-requests`, {
+          permission: "connectTools",
+          reason: "Already have it",
+        })
+      ).status,
+    ).toBe(409);
   });
   it("edge: a second request for the same pending permission is a 409", async () => {
-    expect((await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "createAgents", reason: "First ask" })).status).toBe(201);
-    expect((await as(editor).post(`/workspaces/${ws.id}/permission-requests`, { permission: "createAgents", reason: "Second ask" })).status).toBe(409);
+    expect(
+      (
+        await as(editor).post(`/workspaces/${ws.id}/permission-requests`, {
+          permission: "createAgents",
+          reason: "First ask",
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await as(editor).post(`/workspaces/${ws.id}/permission-requests`, {
+          permission: "createAgents",
+          reason: "Second ask",
+        })
+      ).status,
+    ).toBe(409);
   });
   it("edge: unknown decision, unknown request and malformed request id are 404s", async () => {
     expect((await as(admin).post(`/workspaces/${ws.id}/permission-requests/${NIL_UUID}/maybe`)).status).toBe(404);
@@ -152,7 +248,10 @@ describe("PM-04 permission requests", () => {
     expect((await as(admin).post(`/workspaces/${ws.id}/permission-requests/not-a-uuid/approve`)).status).toBe(404);
   });
   it("security: Admins cannot file requests and Editors cannot decide them", async () => {
-    expect((await as(admin).post(`/workspaces/${ws.id}/permission-requests`, { permission: "createAgents", reason: "x" })).status).toBe(403);
+    expect(
+      (await as(admin).post(`/workspaces/${ws.id}/permission-requests`, { permission: "createAgents", reason: "x" }))
+        .status,
+    ).toBe(403);
     expect((await as(editor).post(`/workspaces/${ws.id}/permission-requests/${NIL_UUID}/approve`)).status).toBe(403);
   });
 });

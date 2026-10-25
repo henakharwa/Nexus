@@ -4,22 +4,205 @@ export { getPool, closePool, openListenerConnection, closeListenerConnection } f
 export { encryptToken, decryptToken, hashSessionToken } from "./crypto.js";
 export { runMigrations, rollbackLastMigration, listMigrationFiles, listAppliedMigrations } from "./migrations.js";
 export type { MigrationFile, AppliedMigration } from "./migrations.js";
-export { runWithAdvisoryLock, tryWithAdvisoryLock, saveOAuthPendingState, consumeOAuthPendingState, consumeRateLimit, isRateLimited, checkDatabaseHealth } from "./system.js";
-export { WorkspaceNameTakenError, normalizeWorkspaceName, createWorkspace, addWorkspaceMember, isWorkspaceMemberEmail, createWorkspaceInvitation, deleteWorkspaceInvitation, listWorkspaceInvitations, revokeWorkspaceInvitation, acceptWorkspaceInvitation, getWorkspaceById, getWorkspaceByJoinCode, deleteWorkspace, listWorkspacesForUser, listWorkspaceMembers, listWorkspaceMembersWithRoles, getWorkspaceRole, setWorkspaceMemberRole, removeWorkspaceMember, removeWorkspaceMemberAndPersonalIntegrations } from "./workspaces.js";
+export {
+  runWithAdvisoryLock,
+  tryWithAdvisoryLock,
+  saveOAuthPendingState,
+  consumeOAuthPendingState,
+  consumeRateLimit,
+  isRateLimited,
+  checkDatabaseHealth,
+} from "./system.js";
+export {
+  WorkspaceNameTakenError,
+  normalizeWorkspaceName,
+  createWorkspace,
+  addWorkspaceMember,
+  isWorkspaceMemberEmail,
+  createWorkspaceInvitation,
+  deleteWorkspaceInvitation,
+  listWorkspaceInvitations,
+  revokeWorkspaceInvitation,
+  acceptWorkspaceInvitation,
+  getWorkspaceById,
+  getWorkspaceByJoinCode,
+  rotateWorkspaceJoinCode,
+  getWorkspaceJoinApprovalRequired,
+  setWorkspaceJoinApprovalRequired,
+  createWorkspaceJoinRequest,
+  listWorkspaceJoinRequests,
+  resolveWorkspaceJoinRequest,
+  deleteWorkspace,
+  listWorkspacesForUser,
+  listWorkspaceMembers,
+  listWorkspaceMembersWithRoles,
+  getWorkspaceRole,
+  setWorkspaceMemberRole,
+  removeWorkspaceMember,
+  removeWorkspaceMemberAndPersonalIntegrations,
+} from "./workspaces.js";
 export type { AcceptWorkspaceInvitationResult } from "./workspaces.js";
-export { createConversation, listConversations, renameConversation, setConversationPinned, setConversationArchived, getConversation, deleteConversation, insertMessage, listMessages } from "./conversations.js";
-export { notifyWorkspaceMembers, ensurePendingActionNotifications, escalateUnreadDecisionNotifications, createDailyNotificationDigests, listNotifications, markNotificationsRead, markNotificationSelectionRead, getNotificationPreferences, updateNotificationPreferences, notifyWorkspaceUser } from "./notifications.js";
-export { getWorkspacePermissionPolicy, setWorkspacePermissionPolicy, hasWorkspacePermission, createPermissionRequest, listPermissionRequests, resolvePermissionRequest } from "./permissions.js";
-export { listWorkspaceAgents, getWorkspaceAgent, getPublishedWorkspaceAgent, createWorkspaceAgent, updateWorkspaceAgent, publishWorkspaceAgent, listWorkspaceAgentVersions, deleteWorkspaceAgent } from "./agents.js";
-export { listWorkspaceWorkflows, getWorkspaceWorkflow, createWorkspaceWorkflow, updateWorkspaceWorkflow, deleteWorkspaceWorkflow, setWorkflowConversation, setWorkflowOwner, listEventWorkflows, createWorkflowRun, finishWorkflowRun, countRecentFailedWorkflowRuns, getObservabilityRetentionPolicy, updateFailureAlertThreshold, updateObservabilityRetentionPolicy, enforceWorkflowRunRetention, listWorkflowRuns, listWorkspaceWorkflowRuns, claimDueWorkflows } from "./workflows.js";
+export {
+  createConversation,
+  listConversations,
+  renameConversation,
+  setConversationPinned,
+  setConversationArchived,
+  getConversation,
+  deleteConversation,
+  insertMessage,
+  listMessages,
+} from "./conversations.js";
+export {
+  notifyWorkspaceMembers,
+  ensurePendingActionNotifications,
+  escalateUnreadDecisionNotifications,
+  createDailyNotificationDigests,
+  listNotifications,
+  markNotificationsRead,
+  markNotificationSelectionRead,
+  getNotificationPreferences,
+  updateNotificationPreferences,
+  notifyWorkspaceUser,
+} from "./notifications.js";
+export {
+  getWorkspacePermissionPolicy,
+  setWorkspacePermissionPolicy,
+  hasWorkspacePermission,
+  createPermissionRequest,
+  listPermissionRequests,
+  resolvePermissionRequest,
+} from "./permissions.js";
+export {
+  listWorkspaceAgents,
+  getWorkspaceAgent,
+  getPublishedWorkspaceAgent,
+  createWorkspaceAgent,
+  updateWorkspaceAgent,
+  publishWorkspaceAgent,
+  listWorkspaceAgentVersions,
+  deleteWorkspaceAgent,
+} from "./agents.js";
+export {
+  listWorkspaceWorkflows,
+  getWorkspaceWorkflow,
+  createWorkspaceWorkflow,
+  updateWorkspaceWorkflow,
+  deleteWorkspaceWorkflow,
+  setWorkflowConversation,
+  setWorkflowOwner,
+  listEventWorkflows,
+  createWorkflowRun,
+  finishWorkflowRun,
+  countRecentFailedWorkflowRuns,
+  getObservabilityRetentionPolicy,
+  updateFailureAlertThreshold,
+  updateObservabilityRetentionPolicy,
+  enforceWorkflowRunRetention,
+  listWorkflowRuns,
+  listWorkspaceWorkflowRuns,
+  claimDueWorkflows,
+} from "./workflows.js";
 export { listWorkspaceTasks, createWorkspaceTask, updateWorkspaceTask, deleteWorkspaceTask } from "./tasks.js";
-export { listWorkspaceMemory, createWorkspaceMemory, updateWorkspaceMemory, getWorkspaceMemory, deleteWorkspaceMemory, workspaceMemoryContext, formatWorkspaceMemoryContext } from "./memory.js";
-export { listWorkspaceArtifacts, getWorkspaceArtifact, heartbeatArtifactPresence, createWorkspaceArtifact, updateWorkspaceArtifact, deleteWorkspaceArtifact, setArtifactShareToken, getPublicDashboardByShareToken, getPublicReleaseNotesByShareToken, getPublicArtifactByShareToken, listWorkspaceArtifactComments, createWorkspaceArtifactComment, listWorkspaceArtifactVersions, restoreWorkspaceArtifactVersion } from "./artifacts.js";
+export {
+  listWorkspaceMemory,
+  createWorkspaceMemory,
+  updateWorkspaceMemory,
+  getWorkspaceMemory,
+  deleteWorkspaceMemory,
+  workspaceMemoryContext,
+  formatWorkspaceMemoryContext,
+} from "./memory.js";
+export {
+  listWorkspaceArtifacts,
+  getWorkspaceArtifact,
+  heartbeatArtifactPresence,
+  createWorkspaceArtifact,
+  updateWorkspaceArtifact,
+  deleteWorkspaceArtifact,
+  setArtifactShareToken,
+  getPublicDashboardByShareToken,
+  getPublicReleaseNotesByShareToken,
+  getPublicArtifactByShareToken,
+  listWorkspaceArtifactComments,
+  createWorkspaceArtifactComment,
+  listWorkspaceArtifactVersions,
+  restoreWorkspaceArtifactVersion,
+} from "./artifacts.js";
 export { getUserWorkspacePreference, setUserWorkspacePreference } from "./preferences.js";
-export { upsertGithubIntegration, saveGithubOAuthToken, setGithubRepo, upsertSlackIntegration, upsertRemoteMcpIntegration, setFigmaTeam, listIntegrations, getIntegrationCredential, deleteIntegrationForOwner, deletePersonalIntegrationsForUser } from "./integrations.js";
-export { createPendingAction, getPendingAction, listPendingActions, resolvePendingAction, listActionsForConflictCheck, setActionExecutedAs, expireStalePendingActions, actionApprovalTtlHours } from "./pending-actions.js";
-export { listApprovalRules, getApprovalRule, countApprovalRules, createApprovalRule, updateApprovalRule, deleteApprovalRule, recordActionApproval, listActionApprovals, createStandingApproval, findStandingApproval, listStandingApprovals, getStandingApproval, revokeStandingApproval, countWorkspaceApprovers } from "./approval-rules.js";
-export { getOrCreateWorkspaceWebhookSecret, getWorkspaceWebhookSecret, rotateWorkspaceWebhookSecret, getWorkspaceWebhookStatus, recordWebhookDelivery, setIntegrationAccountLogin } from "./github-team.js";
+export {
+  upsertGithubIntegration,
+  saveGithubOAuthToken,
+  setGithubRepo,
+  upsertSlackIntegration,
+  upsertRemoteMcpIntegration,
+  setFigmaTeam,
+  listIntegrations,
+  getIntegrationCredential,
+  deleteIntegrationForOwner,
+  deletePersonalIntegrationsForUser,
+} from "./integrations.js";
+export {
+  createPendingAction,
+  getPendingAction,
+  listPendingActions,
+  resolvePendingAction,
+  listActionsForConflictCheck,
+  setActionExecutedAs,
+  expireStalePendingActions,
+  actionApprovalTtlHours,
+} from "./pending-actions.js";
+export {
+  listApprovalRules,
+  getApprovalRule,
+  countApprovalRules,
+  createApprovalRule,
+  updateApprovalRule,
+  deleteApprovalRule,
+  recordActionApproval,
+  listActionApprovals,
+  createStandingApproval,
+  findStandingApproval,
+  listStandingApprovals,
+  getStandingApproval,
+  revokeStandingApproval,
+  countWorkspaceApprovers,
+} from "./approval-rules.js";
+export {
+  getOrCreateWorkspaceWebhookSecret,
+  getWorkspaceWebhookSecret,
+  rotateWorkspaceWebhookSecret,
+  getWorkspaceWebhookStatus,
+  recordWebhookDelivery,
+  setIntegrationAccountLogin,
+} from "./github-team.js";
 export { recordAuditEvent, listAuditEvents } from "./audit.js";
-export { upsertUserFromGithub, getUserById, createPasswordUser, getPasswordCredential, upsertUserFromGoogle, createSession, getUserBySessionToken, deleteSession, countActiveSessionsForUser, listSessionsForUser, revokeOtherSessionsForUser, pruneExpiredSessions, createEmailVerificationToken, verifyEmailToken, getPasswordCredentialByUserId, createPasswordResetToken, consumePasswordResetToken, updatePasswordHash, deleteSessionsForUser } from "./users.js";
-export { REALTIME_CHANNEL, publishRealtimeEvent, getRealtimeEvent, pruneRealtimeEvents, tryAcquireAgentTurnLock, releaseAgentTurnLock } from "./realtime.js";
+export {
+  upsertUserFromGithub,
+  getUserById,
+  createPasswordUser,
+  getPasswordCredential,
+  upsertUserFromGoogle,
+  createSession,
+  getUserBySessionToken,
+  deleteSession,
+  countActiveSessionsForUser,
+  listSessionsForUser,
+  revokeOtherSessionsForUser,
+  pruneExpiredSessions,
+  createEmailVerificationToken,
+  verifyEmailToken,
+  getPasswordCredentialByUserId,
+  createPasswordResetToken,
+  consumePasswordResetToken,
+  updatePasswordHash,
+  deleteSessionsForUser,
+} from "./users.js";
+export {
+  REALTIME_CHANNEL,
+  publishRealtimeEvent,
+  getRealtimeEvent,
+  pruneRealtimeEvents,
+  tryAcquireAgentTurnLock,
+  releaseAgentTurnLock,
+} from "./realtime.js";

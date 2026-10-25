@@ -5,11 +5,17 @@ import type { WorkspaceMember, WorkspaceRole } from "@mai-chat/shared-types";
 import { useDialog } from "../../../_components/DialogProvider";
 import {
   describeError,
+  getWorkspaceJoinPolicy,
+  listWorkspaceJoinRequests,
   listWorkspaceInvitations,
+  listWorkspaceMembers,
   removeWorkspaceMember,
+  resolveWorkspaceJoinRequest,
   revokeWorkspaceInvitation,
   sendWorkspaceInvitation,
+  updateWorkspaceJoinPolicy,
   updateWorkspaceMemberRole,
+  type WorkspaceJoinRequest,
 } from "../../../../lib/api";
 import { colorForName, initialsForName } from "../../../../lib/avatar";
 import { CloseGlyph } from "./glyphs";
@@ -30,12 +36,46 @@ export default function AccessManager({
   const [invitations, setInvitations] = useState<
     Array<{ id: string; email: string; role: WorkspaceRole; expiresAt: string }>
   >([]);
+  const [approvalRequired, setApprovalRequired] = useState(false);
+  const [joinRequests, setJoinRequests] = useState<WorkspaceJoinRequest[]>([]);
+  const [savingJoinPolicy, setSavingJoinPolicy] = useState(false);
   const dialog = useDialog();
   useEffect(() => {
-    listWorkspaceInvitations(workspaceId)
-      .then(setInvitations)
+    Promise.all([
+      listWorkspaceInvitations(workspaceId),
+      getWorkspaceJoinPolicy(workspaceId),
+      listWorkspaceJoinRequests(workspaceId),
+    ])
+      .then(([nextInvitations, policy, requests]) => {
+        setInvitations(nextInvitations);
+        setApprovalRequired(policy.approvalRequired);
+        setJoinRequests(requests);
+      })
       .catch(() => {});
   }, [workspaceId]);
+
+  async function changeJoinPolicy(required: boolean) {
+    setSavingJoinPolicy(true);
+    setError(null);
+    try {
+      await updateWorkspaceJoinPolicy(workspaceId, required);
+      setApprovalRequired(required);
+    } catch (err) {
+      setError(describeError(err, "Could not update the join policy."));
+    } finally {
+      setSavingJoinPolicy(false);
+    }
+  }
+
+  async function decideJoinRequest(request: WorkspaceJoinRequest, decision: "approve" | "deny") {
+    try {
+      await resolveWorkspaceJoinRequest(workspaceId, request.id, decision);
+      setJoinRequests((current) => current.filter((item) => item.id !== request.id));
+      if (decision === "approve") onChanged(await listWorkspaceMembers(workspaceId));
+    } catch (err) {
+      setError(describeError(err, `Could not ${decision} this join request.`));
+    }
+  }
   async function changeRole(member: WorkspaceMember, role: WorkspaceRole) {
     try {
       await updateWorkspaceMemberRole(workspaceId, member.id, role);
@@ -118,6 +158,44 @@ export default function AccessManager({
             </div>
           ))}
         </div>
+        <section className="access-join-policy">
+          <div>
+            <h3>Join-code access</h3>
+            <p>Require an Admin to approve every new join-code request. Email invitations still work immediately.</p>
+          </div>
+          <label className="access-toggle">
+            <input
+              type="checkbox"
+              checked={approvalRequired}
+              disabled={savingJoinPolicy}
+              onChange={(event) => void changeJoinPolicy(event.target.checked)}
+            />
+            Require approval
+          </label>
+        </section>
+        <section className="access-invitations access-join-requests">
+          <h3>Join-code requests</h3>
+          {joinRequests.length ? (
+            joinRequests.map((joinRequest) => (
+              <div key={joinRequest.id}>
+                <span>
+                  <strong>{joinRequest.displayName}</strong>
+                  <small>{joinRequest.email ?? "No email address"}</small>
+                </span>
+                <aside>
+                  <button type="button" onClick={() => void decideJoinRequest(joinRequest, "approve")}>
+                    Approve
+                  </button>
+                  <button type="button" onClick={() => void decideJoinRequest(joinRequest, "deny")}>
+                    Deny
+                  </button>
+                </aside>
+              </div>
+            ))
+          ) : (
+            <p>No pending join-code requests.</p>
+          )}
+        </section>
         <section className="access-invitations">
           <h3>Pending invitations</h3>
           {invitations.length ? (

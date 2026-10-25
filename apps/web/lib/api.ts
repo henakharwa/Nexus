@@ -182,6 +182,47 @@ export async function revokeWorkspaceInvitation(workspaceId: string, invitationI
   if (!res.ok) await parseJsonOrThrow(res);
 }
 
+export type WorkspaceJoinRequest = {
+  id: string;
+  userId: string;
+  displayName: string;
+  email: string | null;
+  createdAt: string;
+};
+
+export async function getWorkspaceJoinPolicy(workspaceId: string): Promise<{ approvalRequired: boolean }> {
+  const res = await authenticatedFetch(`${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/join-policy`);
+  return (await parseJsonOrThrow(res)) as { approvalRequired: boolean };
+}
+
+export async function updateWorkspaceJoinPolicy(workspaceId: string, approvalRequired: boolean): Promise<void> {
+  const res = await authenticatedFetch(`${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/join-policy`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ approvalRequired }),
+  });
+  if (!res.ok) await parseJsonOrThrow(res);
+}
+
+export async function listWorkspaceJoinRequests(workspaceId: string): Promise<WorkspaceJoinRequest[]> {
+  const res = await authenticatedFetch(
+    `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/join-requests`,
+  );
+  return (await parseJsonOrThrow(res)) as WorkspaceJoinRequest[];
+}
+
+export async function resolveWorkspaceJoinRequest(
+  workspaceId: string,
+  requestId: string,
+  decision: "approve" | "deny",
+): Promise<void> {
+  const res = await authenticatedFetch(
+    `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/join-requests/${encodeURIComponent(requestId)}/${decision}`,
+    { method: "POST" },
+  );
+  if (!res.ok) await parseJsonOrThrow(res);
+}
+
 export async function listMessages(workspaceId: string, conversationId: string): Promise<ChatMessage[]> {
   const res = await authenticatedFetch(
     `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/messages?conversationId=${encodeURIComponent(conversationId)}`,

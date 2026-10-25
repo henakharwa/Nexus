@@ -110,6 +110,59 @@
   font-size: 13px;
 }
 
+.access-join-policy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 18px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.access-join-policy h3 {
+  margin: 0 0 4px;
+  color: var(--palette-slate-675);
+  font-size: 15px;
+}
+
+.access-join-policy p {
+  max-width: 350px;
+  margin: 0;
+  color: var(--palette-slate-450);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.access-toggle {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--palette-slate-675);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.access-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--palette-violet-525);
+}
+
+.access-join-requests {
+  margin-top: 0;
+}
+
+@media (max-width: 520px) {
+  .access-join-policy {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .access-invitations small {
   margin-top: 2px;
   color: var(--palette-slate-450);

@@ -12,10 +12,22 @@ export function registerMembersRoutes({ app, requireRole }: RouteContext): void 
     const members = await db.listWorkspaceMembersWithRoles(paramString(req.params.id));
     const target = members.find((member) => member.id === paramString(req.params.userId));
     if (!target) return res.status(404).json({ error: "member not found" });
-    if (target.role === "admin" && role !== "admin" && members.filter((member) => member.role === "admin").length === 1) {
+    if (
+      target.role === "admin" &&
+      role !== "admin" &&
+      members.filter((member) => member.role === "admin").length === 1
+    ) {
       return res.status(409).json({ error: "A workspace must keep at least one admin." });
     }
     await db.setWorkspaceMemberRole(paramString(req.params.id), target.id, role);
+    await db.recordAuditEvent({
+      workspaceId: paramString(req.params.id),
+      eventType: "member.role_changed",
+      actorType: "user",
+      actorUserId: req.user!.id,
+      actorName: req.user!.displayName,
+      summary: `${req.user!.displayName} changed ${target.displayName}'s role to ${role}`,
+    });
     res.status(204).end();
   });
 
@@ -26,8 +38,18 @@ export function registerMembersRoutes({ app, requireRole }: RouteContext): void 
     const members = await db.listWorkspaceMembersWithRoles(workspaceId);
     const target = members.find((member) => member.id === userId);
     if (!target) return res.status(404).json({ error: "member not found" });
-    if (target.role === "admin" && members.filter((member) => member.role === "admin").length === 1) return res.status(409).json({ error: "A workspace must keep at least one admin." });
-    if (!(await db.removeWorkspaceMemberAndPersonalIntegrations(workspaceId, userId))) return res.status(404).json({ error: "member not found" });
+    if (target.role === "admin" && members.filter((member) => member.role === "admin").length === 1)
+      return res.status(409).json({ error: "A workspace must keep at least one admin." });
+    if (!(await db.removeWorkspaceMemberAndPersonalIntegrations(workspaceId, userId)))
+      return res.status(404).json({ error: "member not found" });
+    await db.recordAuditEvent({
+      workspaceId,
+      eventType: "member.removed",
+      actorType: "user",
+      actorUserId: req.user!.id,
+      actorName: req.user!.displayName,
+      summary: `${req.user!.displayName} removed ${target.displayName}; the join code was rotated`,
+    });
     res.status(204).end();
   });
 
@@ -39,10 +61,13 @@ export function registerMembersRoutes({ app, requireRole }: RouteContext): void 
     if (!UUID_RE.test(workspaceId)) return res.status(400).json({ error: "invalid workspace id" });
     const role = await db.getWorkspaceRole(workspaceId, req.user!.id);
     if (!role) return res.status(404).json({ error: "member not found" });
-    if (role !== "admin") return res.status(403).json({ error: "Editors cannot leave a workspace. Ask an Admin to remove you instead." });
+    if (role !== "admin")
+      return res.status(403).json({ error: "Editors cannot leave a workspace. Ask an Admin to remove you instead." });
     const members = await db.listWorkspaceMembersWithRoles(workspaceId);
     if (members.length > 1 && members.filter((member) => member.role === "admin").length === 1) {
-      return res.status(409).json({ error: "Make another member an Admin before leaving. A workspace must keep at least one admin." });
+      return res
+        .status(409)
+        .json({ error: "Make another member an Admin before leaving. A workspace must keep at least one admin." });
     }
     if (!(await db.removeWorkspaceMemberAndPersonalIntegrations(workspaceId, req.user!.id))) {
       return res.status(404).json({ error: "member not found" });
@@ -53,7 +78,7 @@ export function registerMembersRoutes({ app, requireRole }: RouteContext): void 
       actorType: "user",
       actorUserId: req.user!.id,
       actorName: req.user!.displayName,
-      summary: `${req.user!.displayName} left the workspace and removed their personal tool connections`,
+      summary: `${req.user!.displayName} left the workspace, removed their personal tool connections, and rotated the join code`,
     });
     res.status(204).end();
   });
