@@ -354,7 +354,9 @@
 }
 
 .workspace-account {
-  display: flex;
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr) 34px;
+  grid-template-rows: auto auto;
   align-items: center;
   gap: 9px;
   margin-top: auto;
@@ -362,6 +364,8 @@
 }
 
 .workspace-account-avatar {
+  grid-column: 1;
+  grid-row: 1;
   display: grid;
   place-items: center;
   width: 31px;
@@ -373,6 +377,8 @@
 }
 
 .workspace-account > span:nth-child(2) {
+  grid-column: 2;
+  grid-row: 1;
   display: grid;
   min-width: 0;
   flex: 1;
@@ -396,13 +402,19 @@
 
 .workspace-account .account-security-button {
   display: inline-flex;
-  flex: 0 0 auto;
+  grid-column: 1 / -1;
+  grid-row: 2;
   gap: 5px;
-  width: auto;
+  width: 100%;
   padding: 0 8px;
   color: var(--text-ink);
   font-size: 12px;
   font-weight: 700;
+}
+
+.workspace-account > button:last-child {
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .workspace-account .account-security-button svg {
