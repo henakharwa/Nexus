@@ -9,7 +9,7 @@ function request(app: express.Express) {
   if (!agents.has(app)) agents.set(app, supertest.agent(app));
   return agents.get(app)!;
 }
-import { getPool, closePool, getUserBySessionToken } from "@mai-chat/db";
+import { getPool, closePool, createSession, getUserBySessionToken, pruneExpiredSessions } from "@mai-chat/db";
 import { registerUserAuthRoutes, attachUser, requireAuth, type UserAuthConfig, type UserAuthDeps } from "../src/auth.js";
 
 loadEnv({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
@@ -247,6 +247,38 @@ describe("GET /auth/me", () => {
     expect(me.status).toBe(200);
     expect(me.body.username).toBe("octocat");
     expect(me.body.displayName).toBe("The Octocat");
+  });
+});
+
+describe("session management", () => {
+  it("lists sessions without exposing tokens, signs out other devices, and prunes expired records", async () => {
+    const app = makeApp({
+      ...okDeps,
+      fetchGithubUser: async () => ({ githubId: `sessions-${Date.now()}`, email: `sessions-${Date.now()}@example.test`, username: "sessions", displayName: "Sessions" }),
+    });
+    const start = await request(app).get("/auth/login/github/start");
+    const callback = await request(app).get("/auth/login/github/callback").query({ code: "good-code", state: new URL(start.headers.location).searchParams.get("state") });
+    const cookie = extractCookie(callback);
+    const currentToken = cookie.split("=")[1];
+    const currentUser = await getUserBySessionToken(currentToken);
+    expect(currentUser).not.toBeNull();
+    const other = await createSession(currentUser!.id, 60_000);
+    const expired = await createSession(currentUser!.id, -1_000);
+
+    const listed = await request(app).get("/auth/sessions").set("Cookie", cookie);
+    expect(listed.status).toBe(200);
+    expect(listed.body.sessions).toHaveLength(2);
+    expect(listed.body.sessions.filter((session: { current: boolean }) => session.current)).toHaveLength(1);
+    expect(JSON.stringify(listed.body)).not.toContain(currentToken);
+    expect(JSON.stringify(listed.body)).not.toContain(other.token);
+
+    const revoked = await request(app).post("/auth/sessions/revoke-others").set("Cookie", cookie);
+    expect(revoked.status).toBe(200);
+    expect(revoked.body).toEqual({ revoked: 1 });
+    expect(await getUserBySessionToken(other.token)).toBeNull();
+    expect(await getUserBySessionToken(currentToken)).not.toBeNull();
+    expect(await pruneExpiredSessions()).toBeGreaterThanOrEqual(1);
+    expect(await getUserBySessionToken(expired.token)).toBeNull();
   });
 });
 

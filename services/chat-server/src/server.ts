@@ -101,7 +101,12 @@ export function createApp(deps: CreateServerDeps = defaultDeps) {
     webAppUrl,
     secureCookie: new URL(webAppUrl).protocol === "https:",
     authCookiePath: `${publicApiPath}/auth` || "/auth",
-    emailVerificationEnabled: process.env.EMAIL_VERIFICATION_ENABLED === "true",
+    // Production must send verification mail by default. Local development
+    // stays convenient unless explicitly enabled, while production can only
+    // be opted out of deliberately with EMAIL_VERIFICATION_ENABLED=false.
+    emailVerificationEnabled: process.env.NODE_ENV === "production"
+      ? process.env.EMAIL_VERIFICATION_ENABLED !== "false"
+      : process.env.EMAIL_VERIFICATION_ENABLED === "true",
   };
   registerUserAuthRoutes(app, userAuthConfig, deps.userAuthDeps, deps.mailer);
   registerEmailVerificationRoutes(app, userAuthConfig, deps.mailer);
@@ -578,6 +583,7 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
   };
   let retentionScheduler: NodeJS.Timeout | undefined;
   let notificationScheduler: NodeJS.Timeout | undefined;
+  let sessionCleanupScheduler: NodeJS.Timeout | undefined;
   const enforceRetention = () => void db.runWithAdvisoryLock("workflow-run-retention", () => db.enforceWorkflowRunRetention()).catch((error) => {
     console.error("workflow retention failed", error);
     captureError(error, { where: "workflow-retention" });
@@ -589,8 +595,12 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     console.error("notification scheduler failed", error);
     captureError(error, { where: "notification-scheduler" });
   });
-  server.on("listening", () => { startWorkflowScheduler(); enforceRetention(); deliverNotificationJobs(); retentionScheduler = setInterval(enforceRetention, 24 * 60 * 60 * 1000); notificationScheduler = setInterval(deliverNotificationJobs, 5 * 60 * 1000); });
-  server.on("close", () => { void roomBus?.close(); if (workflowScheduler) clearInterval(workflowScheduler); if (retentionScheduler) clearInterval(retentionScheduler); if (notificationScheduler) clearInterval(notificationScheduler); workflowScheduler = undefined; retentionScheduler = undefined; notificationScheduler = undefined; });
+  const pruneSessions = () => void db.pruneExpiredSessions().catch((error) => {
+    console.error("session cleanup failed", error);
+    captureError(error, { where: "session-cleanup" });
+  });
+  server.on("listening", () => { startWorkflowScheduler(); enforceRetention(); deliverNotificationJobs(); pruneSessions(); retentionScheduler = setInterval(enforceRetention, 24 * 60 * 60 * 1000); notificationScheduler = setInterval(deliverNotificationJobs, 5 * 60 * 1000); sessionCleanupScheduler = setInterval(pruneSessions, 24 * 60 * 60 * 1000); });
+  server.on("close", () => { void roomBus?.close(); if (workflowScheduler) clearInterval(workflowScheduler); if (retentionScheduler) clearInterval(retentionScheduler); if (notificationScheduler) clearInterval(notificationScheduler); if (sessionCleanupScheduler) clearInterval(sessionCleanupScheduler); workflowScheduler = undefined; retentionScheduler = undefined; notificationScheduler = undefined; sessionCleanupScheduler = undefined; });
 
   wss.on("connection", (ws: WebSocket, req) => {
     if (req.headers.origin && req.headers.origin !== (process.env.WEB_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "")) {

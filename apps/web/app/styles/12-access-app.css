@@ -171,6 +171,33 @@ fieldset.access-readonly:disabled button {
   min-width: 96px;
 }
 
+.account-sessions-dialog {
+  width: min(520px, 100%);
+}
+
+.account-session-list {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.account-session-list li {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+
+.account-session-list small {
+  color: var(--text-dim);
+}
+
 /* One button system: .btn / .btn.secondary / .btn.danger and the workspace
    .primary-button / .secondary-button share shape, weight and states. */
 .btn,

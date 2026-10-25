@@ -974,6 +974,23 @@ export async function logout(): Promise<void> {
   await authenticatedFetch(`${CHAT_SERVER_URL}/auth/logout`, { method: "POST", credentials: "include" });
 }
 
+export type AccountSession = { createdAt: string; expiresAt: string; current: boolean };
+
+export async function listAccountSessions(): Promise<AccountSession[]> {
+  const result = (await parseJsonOrThrow(
+    await authenticatedFetch(`${CHAT_SERVER_URL}/auth/sessions`),
+  )) as { sessions: AccountSession[] };
+  return result.sessions;
+}
+
+/** Keeps this browser signed in and revokes every other active session. */
+export async function revokeOtherAccountSessions(): Promise<number> {
+  const result = (await parseJsonOrThrow(
+    await authenticatedFetch(`${CHAT_SERVER_URL}/auth/sessions/revoke-others`, { method: "POST" }),
+  )) as { revoked: number };
+  return result.revoked;
+}
+
 export function loginWithGoogleUrl(returnTo?: string): string {
   const url = new URL(`${CHAT_SERVER_URL}/auth/login/google/start`);
   if (returnTo) url.searchParams.set("returnTo", returnTo);

@@ -57,20 +57,20 @@ describe("email account authentication", () => {
     const app = makeApp(); const account = newAccount();
     await request(app).post("/auth/signup/email").send(account);
     const duplicate = await request(app).post("/auth/signup/email").send({ ...account, email: account.email.toUpperCase() });
-    expect(duplicate.status).toBe(409);
+    expect(duplicate.status).toBe(400);
+    expect(duplicate.body.error).toBe("Unable to create an account. Check your details and try again.");
     expect((await db.getPool().query("SELECT count(*) FROM users WHERE username = $1", [account.email])).rows[0].count).toBe("1");
   });
-  // Product decision (email-auth.ts): an unknown email is told to sign up
-  // instead of being shown a generic error; both still fail with 401 and
-  // never set a session cookie.
+  // Unknown and incorrect credentials must be indistinguishable to avoid
+  // exposing whether an email address has an account.
   it("rejects an unknown email and a wrong password without signing in", async () => {
     const app = makeApp(); const account = newAccount();
     await request(app).post("/auth/signup/email").send(account);
     const wrong = await request(app).post("/auth/login/email").send({ ...account, password: "wrong" });
     const unknown = await request(app).post("/auth/login/email").send(newAccount());
     expect(wrong.status).toBe(401); expect(unknown.status).toBe(401);
-    expect(wrong.body.error).toBe("Incorrect email or password.");
-    expect(unknown.body.error).toContain("sign up");
+    expect(wrong.body.error).toBe("Invalid email or password.");
+    expect(unknown.body.error).toBe("Invalid email or password.");
     expect(wrong.headers["set-cookie"]).toBeUndefined(); expect(unknown.headers["set-cookie"]).toBeUndefined();
   });
   it("validates credentials and rejects cross-origin login and non-JSON forms", async () => {

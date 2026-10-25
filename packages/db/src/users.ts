@@ -216,6 +216,43 @@ export async function countActiveSessionsForUser(userId: string): Promise<number
   return Number(result.rows[0]?.n ?? 0);
 }
 
+export interface SessionSummary {
+  createdAt: string;
+  expiresAt: string;
+  current: boolean;
+}
+
+/** Lists live sessions without ever returning a session token or token hash. */
+export async function listSessionsForUser(userId: string, currentToken: string | null): Promise<SessionSummary[]> {
+  const currentHash = currentToken ? hashSessionToken(currentToken) : null;
+  const result = await getPool().query(
+    `SELECT token_hash, created_at, expires_at FROM sessions
+     WHERE user_id = $1 AND expires_at > now()
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+  return result.rows.map((row: { token_hash: string; created_at: Date; expires_at: Date }) => ({
+    createdAt: row.created_at.toISOString(),
+    expiresAt: row.expires_at.toISOString(),
+    current: currentHash === row.token_hash,
+  }));
+}
+
+/** Revokes every live session except the browser making this request. */
+export async function revokeOtherSessionsForUser(userId: string, currentToken: string): Promise<number> {
+  const result = await getPool().query(
+    `DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2 RETURNING token_hash`,
+    [userId, hashSessionToken(currentToken)]
+  );
+  return result.rowCount ?? 0;
+}
+
+/** Removes expired sessions outside the request path. */
+export async function pruneExpiredSessions(): Promise<number> {
+  const result = await getPool().query(`DELETE FROM sessions WHERE expires_at <= now() RETURNING token_hash`);
+  return result.rowCount ?? 0;
+}
+
 // -- Email verification -------------------------------------------------
 // Only meaningful for an email+password account -- see the baseline migration's
 // comment on password_credentials.email_verified_at.

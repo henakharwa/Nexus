@@ -49,10 +49,9 @@ export function registerEmailAuthRoutes(app: Express, config: UserAuthConfig, ma
         const credential = await db.getPasswordCredential(email);
         const matches = await verifyPassword(password, credential?.passwordHash ?? null);
         // Keep the dummy password derivation above even when no account is
-        // found, then give the person an actionable sign-up message instead
-        // of suggesting that an account already exists with a bad password.
-        if (!credential) return res.status(401).json({ error: "No existing account found for this email. Please sign up." });
-        if (!matches) return res.status(401).json({ error: "Incorrect email or password." });
+        // found. Both failures deliberately have the exact same response so
+        // this endpoint cannot be used to enumerate registered addresses.
+        if (!credential || !matches) return res.status(401).json({ error: "Invalid email or password." });
         user = await db.getUserById(credential.userId);
       }
       if (!user) return res.status(401).json({ error: "Incorrect email or password." });
@@ -73,7 +72,9 @@ export function registerEmailAuthRoutes(app: Express, config: UserAuthConfig, ma
       }
     } catch (error) {
       if (signup && (error as { code?: string }).code === "23505") {
-        return res.status(409).json({ error: "Unable to create an account with this email. Try signing in." });
+        // Match other malformed sign-up responses. In particular, do not
+        // disclose that this email is already registered or linked to OAuth.
+        return res.status(400).json({ error: "Unable to create an account. Check your details and try again." });
       }
       res.status(503).json({ error: "Sign-in is temporarily unavailable. Please try again." });
     }

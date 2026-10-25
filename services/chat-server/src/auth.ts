@@ -281,6 +281,20 @@ export function registerUserAuthRoutes(
     res.json(req.user);
   });
 
+  // A person can inspect the sessions currently signed in to their account,
+  // then sign out every other browser/device without losing this session.
+  app.get("/auth/sessions", requireAuth, async (req: Request, res: Response) => {
+    const token = parseSessionToken(req.headers.cookie);
+    res.json({ sessions: await db.listSessionsForUser(req.user!.id, token) });
+  });
+
+  app.post("/auth/sessions/revoke-others", requireAuth, async (req: Request, res: Response) => {
+    const token = parseSessionToken(req.headers.cookie);
+    if (!token) return res.status(401).json({ error: "sign in required" });
+    const revoked = await db.revokeOtherSessionsForUser(req.user!.id, token);
+    res.json({ revoked });
+  });
+
   app.post("/auth/logout", async (req: Request, res: Response) => {
     const token = parseSessionToken(req.headers.cookie);
     if (token) await db.deleteSession(token);
