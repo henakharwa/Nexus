@@ -11,7 +11,7 @@ import {
   type AccountSession,
 } from "../../../../lib/api";
 import { colorForName, initialsForName } from "../../../../lib/avatar";
-import { SignOutGlyph } from "./glyphs";
+import { ShieldGlyph, SignOutGlyph } from "./glyphs";
 
 // The signed-in member at the bottom of the sidebar, with sign-out.
 export default function AccountBar({
@@ -80,8 +80,9 @@ export default function AccountBar({
           </strong>
           <small>{username}</small>
         </span>
-        <button onClick={openSessions} aria-label="Security and sessions" title="Security and sessions">
-          ⌁
+        <button className="account-security-button" onClick={openSessions} aria-label="Security and sessions">
+          <ShieldGlyph />
+          <span>Security</span>
         </button>
         <button
           onClick={async () => {

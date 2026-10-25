@@ -394,6 +394,22 @@
   font-size: 11px;
 }
 
+.workspace-account .account-security-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  width: auto;
+  padding: 0 8px;
+  color: var(--text-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-account .account-security-button svg {
+  width: 15px;
+  height: 15px;
+}
+
 .workspace-main {
   position: relative;
   z-index: 0;
