@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS workspace_invitations_one_pending_email;

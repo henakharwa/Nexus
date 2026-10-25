@@ -228,6 +228,45 @@ describe("WS-04 invitations", () => {
       .send({ token });
     expect(accepted.body.workspaceId).toBe(ws.id);
   });
+  it("edge: accepts a matching legacy password email even without an email-identity row", async () => {
+    const ws = await makeWorkspace(app, admin);
+    const invitee = await makeUser("LegacyInvitee");
+    await getPool().query("DELETE FROM user_email_identities WHERE user_id = $1", [invitee.id]);
+    const created = await request(app)
+      .post(`/workspaces/${ws.id}/invitations`)
+      .set("Cookie", admin.cookie)
+      .send({ email: invitee.email, role: "editor" });
+    expect(created.status).toBe(201);
+    const invitationEmail = sentEmails.find((email) => email.to === invitee.email);
+    const token = new URL(invitationEmail!.text.match(/https?:\/\/\S+/)![0]).searchParams.get("invite");
+    const accepted = await request(app)
+      .post("/workspace-invitations/accept")
+      .set("Cookie", invitee.cookie)
+      .send({ token });
+    expect(accepted.body.workspaceId).toBe(ws.id);
+  });
+  it("edge: resending replaces the pending invitation and invalidates its old link", async () => {
+    const ws = await makeWorkspace(app, admin);
+    const invitee = await makeUser("ResendInvitee");
+    const send = () =>
+      request(app)
+        .post(`/workspaces/${ws.id}/invitations`)
+        .set("Cookie", admin.cookie)
+        .send({ email: invitee.email, role: "editor" });
+    expect((await send()).status).toBe(201);
+    const firstEmail = sentEmails.filter((email) => email.to === invitee.email).at(-1)!;
+    const firstToken = new URL(firstEmail.text.match(/https?:\/\/\S+/)![0]).searchParams.get("invite");
+    expect((await send()).status).toBe(201);
+    const invitations = await request(app).get(`/workspaces/${ws.id}/invitations`).set("Cookie", admin.cookie);
+    expect(invitations.body).toHaveLength(1);
+    expect((await request(app).post("/workspace-invitations/accept").set("Cookie", invitee.cookie).send({ token: firstToken })).status).toBe(404);
+    const secondEmail = sentEmails.filter((email) => email.to === invitee.email).at(-1)!;
+    const secondToken = new URL(secondEmail.text.match(/https?:\/\/\S+/)![0]).searchParams.get("invite");
+    expect(
+      (await request(app).post("/workspace-invitations/accept").set("Cookie", invitee.cookie).send({ token: secondToken })).body
+        .workspaceId,
+    ).toBe(ws.id);
+  });
   it("edge: rejects invalid email, invalid role and existing members", async () => {
     const ws = await makeWorkspace(app, admin, [editor]);
     expect(

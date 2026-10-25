@@ -144,7 +144,6 @@ export default function AccessManager({
   async function resendInvitation(invite: { id: string; email: string; role: WorkspaceRole }) {
     try {
       await sendWorkspaceInvitation(workspaceId, { email: invite.email, role: invite.role });
-      await revokeWorkspaceInvitation(workspaceId, invite.id);
       setInvitations(await listWorkspaceInvitations(workspaceId));
     } catch (err) {
       setError(describeError(err, "Could not resend invitation."));

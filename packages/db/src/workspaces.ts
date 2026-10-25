@@ -116,7 +116,14 @@ export async function createWorkspaceInvitation(input: {
   const expiresAt = new Date(Date.now() + WORKSPACE_INVITATION_TTL_MS);
   await getPool().query(
     `INSERT INTO workspace_invitations (token_hash, workspace_id, email, invited_by_user_id, role, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (workspace_id, email) WHERE accepted_at IS NULL
+     DO UPDATE SET
+       token_hash = EXCLUDED.token_hash,
+       invited_by_user_id = EXCLUDED.invited_by_user_id,
+       role = EXCLUDED.role,
+       created_at = now(),
+       expires_at = EXCLUDED.expires_at`,
     [hashSessionToken(token), input.workspaceId, email, input.invitedByUserId, input.role, expiresAt],
   );
   return { token, email, role: input.role, expiresAt: expiresAt.toISOString() };
@@ -174,7 +181,10 @@ export async function acceptWorkspaceInvitation(
     // must match any verified identity, rather than whichever one happened to
     // be verified most recently.
     const identity = await client.query(
-      "SELECT 1 FROM user_email_identities WHERE user_id = $1 AND email = $2",
+      `SELECT 1 FROM user_email_identities WHERE user_id = $1 AND email = $2
+       UNION ALL
+       SELECT 1 FROM password_credentials WHERE user_id = $1 AND email = $2
+       LIMIT 1`,
       [userId, invitedEmail],
     );
     if (!identity.rows[0]) {
