@@ -9,34 +9,45 @@ import type { ToolExecutor } from "./tools.js";
 // -- neither cares where a tool came from, only its `mutates` flag and
 // whether it has describe()/preview().
 //
-// Mutation classification: GitHub's official MCP server
-// (github/github-mcp-server) enforces at the SOURCE level -- a CI-run,
-// AST-based check (pkg/toolvalidation/readonlyhint.go, invoked from
-// _test.go files in that repo) that fails the build if any registered
-// tool omits an explicit annotations.readOnlyHint -- that every tool it
-// ships sets this. Verified directly by reading the v1.12.2 release
-// source on 2026-09-21 (every `mcp.Tool` literal in pkg/github/*.go has a
-// `ReadOnlyHint: true` or `ReadOnlyHint: false`), not assumed from the MCP
-// spec alone. So for this specific server, readOnlyHint is a reliable
-// signal, not just a hint to eyeball.
+// Never use an MCP server's `annotations.readOnlyHint` to decide whether a
+// call can run without human approval. MCP explicitly describes annotations
+// as hints from a potentially untrusted server, and a compromised or simply
+// mistaken provider must not be able to turn a write into an unreviewed call.
 //
-// Still: the MCP spec itself is explicit that annotations are hints from
-// a potentially-untrusted server and clients "should never make tool use
-// decisions based on ToolAnnotations" received from one -- see
-// https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/.
-// This project's confirm-before-write flow is exactly the kind of
-// decision that warning is about, so as a fail-safe for any tool that
-// omits the hint (a future github-mcp-server regression, or if this
-// module is ever pointed at a different/unknown MCP server), a missing
-// readOnlyHint defaults to "mutates: true" -- the same fail-safe-to-unsafe
-// direction this project's own hand-written GithubToolSpec design always
-// used, and safer than silently letting an unclassified tool run
-// unconfirmed.
+// This is deliberately an allowlist, not a name heuristic. A tool is read
+// only when Nexus recognizes the provider/tool pair below; everything else
+// is treated as a write and therefore becomes an approval proposal.
 // `provider` is the connected service's display name ("GitHub", "Slack",
 // "Linear", ...). It appears on the approval card and in error messages, so
 // a Slack post is never described as running "on GitHub".
+const READ_ONLY_TOOLS: Record<string, ReadonlySet<string>> = {
+  github: new Set([
+    "get_me", "get_file_contents", "get_commit", "get_issue", "issue_read", "get_pull_request", "pull_request_read",
+    "get_repository", "get_discussion", "get_branch", "get_tag", "get_release", "get_workflow", "get_workflow_run",
+    "list_issues", "list_pull_requests", "list_branches", "list_commits", "list_tags", "list_releases", "list_workflows",
+    "list_workflow_runs", "list_workflow_jobs", "list_code_scanning_alerts", "list_discussions", "list_issue_comments",
+    "list_pull_request_comments", "list_pull_request_files", "list_pull_request_reviews", "list_collaborators", "list_labels",
+    "list_milestones", "list_projects", "search_code", "search_issues", "search_repositories", "search_users",
+  ]),
+  slack: new Set([
+    "slack_list_channels", "slack_search_channels", "slack_search_public_and_private_channels", "slack_get_channel_history",
+    "slack_search_messages", "slack_get_thread_replies", "slack_list_users", "slack_get_user_profile",
+  ]),
+  linear: new Set([
+    "get_issue", "get_project", "get_team", "get_user", "list_issues", "list_projects", "list_comments",
+    "list_issue_statuses", "list_teams", "list_users", "search_issues", "search_projects", "search_users",
+  ]),
+  notion: new Set(["notion_search", "notion_get_page", "notion_get_page_content", "notion_query_database"]),
+  figma: new Set(["get_file", "get_file_nodes", "get_file_images", "get_team_projects", "get_project_files"]),
+};
+
+/** True only for a Nexus-reviewed provider/tool pair that cannot change external state. */
+export function isNexusReadOnlyTool(provider: string, name: string): boolean {
+  return READ_ONLY_TOOLS[provider.trim().toLowerCase()]?.has(name) ?? false;
+}
+
 export function mcpToolToExecutor(client: Client, tool: McpTool, provider = "GitHub"): ToolExecutor {
-  const mutates = tool.annotations?.readOnlyHint !== true;
+  const mutates = !isNexusReadOnlyTool(provider, tool.name);
   return {
     definition: {
       type: "function",

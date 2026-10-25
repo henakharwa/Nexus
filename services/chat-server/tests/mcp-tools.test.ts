@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Tool as McpTool } from "@modelcontextprotocol/sdk/types.js";
-import { mcpToolToExecutor, listMcpToolExecutors, normalizeGithubArguments } from "../src/mcp-tools.js";
+import { isNexusReadOnlyTool, mcpToolToExecutor, listMcpToolExecutors, normalizeGithubArguments } from "../src/mcp-tools.js";
 
 function fakeClient(overrides: Partial<Client> = {}): Client {
   return {
@@ -20,11 +20,23 @@ function tool(overrides: Partial<McpTool> & { name: string }): McpTool {
 }
 
 describe("mcpToolToExecutor", () => {
-  it("treats readOnlyHint: true as non-mutating, with no describe/preview", () => {
+  it("allows a reviewed GitHub read tool without approval", () => {
     const executor = mcpToolToExecutor(fakeClient(), tool({ name: "issue_read", annotations: { readOnlyHint: true } }));
     expect(executor.mutates).toBeFalsy();
     expect(executor.describe).toBeUndefined();
     expect(executor.preview).toBeUndefined();
+  });
+
+  it("does not trust a provider readOnlyHint for an unreviewed tool", () => {
+    const executor = mcpToolToExecutor(fakeClient(), tool({ name: "export_workspace", annotations: { readOnlyHint: true } }), "Slack");
+    expect(executor.mutates).toBe(true);
+    expect(typeof executor.describe).toBe("function");
+  });
+
+  it("uses Nexus's provider-specific allowlist rather than matching a name across providers", () => {
+    expect(isNexusReadOnlyTool("GitHub", "issue_read")).toBe(true);
+    expect(isNexusReadOnlyTool("Slack", "issue_read")).toBe(false);
+    expect(isNexusReadOnlyTool("Linear", "save_issue")).toBe(false);
   });
 
   it("treats readOnlyHint: false as mutating, with a describe() and preview()", () => {
