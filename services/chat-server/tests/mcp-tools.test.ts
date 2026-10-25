@@ -51,16 +51,20 @@ describe("mcpToolToExecutor", () => {
     expect(typeof executor.describe!({})).toBe("string");
   });
 
-  it("preview() lists every argument given, truncates long values, and flags a destructive tool", () => {
+  it("preview() lists every argument in full, caps only runaway values visibly, and flags a destructive tool", () => {
     const executor = mcpToolToExecutor(
       fakeClient(),
       tool({ name: "delete_file", annotations: { readOnlyHint: false, destructiveHint: true } })
     );
+    // The card used to cut each value at 500 characters, so hidden content
+    // could pass review. Ordinary long values are now shown in full.
     const longValue = "x".repeat(1000);
     const preview = executor.preview!({ path: "src/x.ts", content: longValue });
     expect(preview).toContain("path: src/x.ts");
     expect(preview).toContain("cannot be undone");
-    expect(preview.length).toBeLessThan(longValue.length);
+    expect(preview).toContain(longValue);
+    const runaway = executor.preview!({ content: "y".repeat(25_000) });
+    expect(runaway).toContain("[… 5,000 more characters not shown]");
   });
 
   it("preview() never throws on an empty args object", () => {

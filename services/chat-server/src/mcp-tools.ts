@@ -116,13 +116,15 @@ function previewCall(tool: McpTool, args: Record<string, unknown>): string {
   if (entries.length === 0) return `${destructive}${tool.name}: no arguments given.`;
   const lines = entries.map(([key, value]) => {
     const text = typeof value === "string" ? value : JSON.stringify(value);
-    return `${key}: ${truncate(text, 500)}`;
+    // Shown in full on the approval card (it scrolls). The cap only guards
+    // against a runaway argument, and says what it left out.
+    return `${key}: ${truncate(text, 20_000)}`;
   });
   return `${destructive}${lines.join("\n")}`;
 }
 
 function truncate(text: string, maxLen: number): string {
-  return text.length <= maxLen ? text : `${text.slice(0, maxLen)}…`;
+  return text.length <= maxLen ? text : `${text.slice(0, maxLen)}\n[… ${(text.length - maxLen).toLocaleString("en-US")} more characters not shown]`;
 }
 
 async function callMcpTool(client: Client, name: string, args: Record<string, unknown>, provider: string): Promise<unknown> {

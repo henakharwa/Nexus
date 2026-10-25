@@ -22,6 +22,23 @@ export interface GithubTeamApi {
   getDefaultBranch?(token: string, owner: string, repo: string): Promise<string | null>;
   /** Whether GitHub protects a branch, and how many approving reviews its rules require (null when not visible to this token). */
   getBranchProtection?(token: string, owner: string, repo: string, branch: string): Promise<{ protected: boolean; requiredReviews: number | null } | null>;
+  // Used to show approvers exactly what an action will change
+  // (change-preview.ts). Null means GitHub couldn't be asked.
+  /** A file's current text, or { exists: false } when there's no such file. */
+  getFileText?(token: string, owner: string, repo: string, path: string, ref: string | null): Promise<{ exists: true; text: string } | { exists: false } | null>;
+  getPullRequest?(token: string, owner: string, repo: string, number: number): Promise<{ title: string; body: string; head: string; base: string; state: string } | null>;
+  /** Files a pull request changes, or that differ between two branches when `base`/`head` are given. */
+  listChangedFiles?(token: string, owner: string, repo: string, which: { pullNumber: number } | { base: string; head: string }): Promise<GithubChangedFile[] | null>;
+  getIssue?(token: string, owner: string, repo: string, number: number): Promise<{ title: string; body: string; state: string; labels: string[] } | null>;
+}
+
+export interface GithubChangedFile {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  // Unified diff; missing for binary or very large files.
+  patch: string | null;
 }
 
 const API = "https://api.github.com";
@@ -153,6 +170,51 @@ export function createGithubTeamApi(fetchImpl: typeof fetch = fetch): GithubTeam
           }
         }
         return { protected: isProtected || requiredReviews !== null, requiredReviews };
+      } catch {
+        return null;
+      }
+    },
+    async getFileText(token, owner, repo, path, ref) {
+      const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+      const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+      try {
+        const response = await githubRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}${query}`, { token, timeoutMs: 8000, headers: { accept: "application/vnd.github.raw+json" } }, fetchImpl);
+        if (response.status === 404) return { exists: false };
+        if (!response.ok) return null;
+        return { exists: true, text: await response.text() };
+      } catch {
+        return null;
+      }
+    },
+    async getPullRequest(token, owner, repo, number) {
+      try {
+        const response = await githubRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${number}`, { token, timeoutMs: 5000 }, fetchImpl);
+        if (!response.ok) return null;
+        const pull = (await response.json()) as { title?: string; body?: string | null; state?: string; head?: { ref?: string }; base?: { ref?: string } };
+        return { title: pull.title ?? "", body: pull.body ?? "", head: pull.head?.ref ?? "", base: pull.base?.ref ?? "", state: pull.state ?? "" };
+      } catch {
+        return null;
+      }
+    },
+    async listChangedFiles(token, owner, repo, which) {
+      const base = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+      const path = "pullNumber" in which ? `${base}/pulls/${which.pullNumber}/files?per_page=100` : `${base}/compare/${encodeURIComponent(which.base)}...${encodeURIComponent(which.head)}`;
+      try {
+        const response = await githubRequest(path, { token, timeoutMs: 8000 }, fetchImpl);
+        if (!response.ok) return null;
+        const body = (await response.json()) as unknown;
+        const files = (Array.isArray(body) ? body : ((body as { files?: unknown[] }).files ?? [])) as Array<{ filename?: string; status?: string; additions?: number; deletions?: number; patch?: string }>;
+        return files.map((file) => ({ filename: file.filename ?? "", status: file.status ?? "modified", additions: file.additions ?? 0, deletions: file.deletions ?? 0, patch: file.patch ?? null }));
+      } catch {
+        return null;
+      }
+    },
+    async getIssue(token, owner, repo, number) {
+      try {
+        const response = await githubRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}`, { token, timeoutMs: 5000 }, fetchImpl);
+        if (!response.ok) return null;
+        const issue = (await response.json()) as { title?: string; body?: string | null; state?: string; labels?: Array<string | { name?: string }> };
+        return { title: issue.title ?? "", body: issue.body ?? "", state: issue.state ?? "", labels: (issue.labels ?? []).map((label) => (typeof label === "string" ? label : label.name ?? "")).filter(Boolean) };
       } catch {
         return null;
       }

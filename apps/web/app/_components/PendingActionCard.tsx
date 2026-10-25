@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import type { PendingAction } from "@mai-chat/shared-types";
 import { ApiError, describeError, confirmAction, cancelAction } from "../../lib/api";
+import { ChangePreviewView, ProposalContextView } from "./ChangePreviewView";
 
 // One card per PendingAction the agent has queued but not yet run (see
 // services/chat-server/src/actions.ts). Only renders for status "pending"
@@ -191,7 +192,12 @@ export default function PendingActionCard({
           </ul>
         </div>
       )}
-      {action.preview && <pre className="pending-action-preview">{action.preview}</pre>}
+      {action.changePreview?.sections.length ? (
+        <ChangePreviewView preview={action.changePreview} />
+      ) : (
+        action.preview && <pre className="pending-action-preview">{action.preview}</pre>
+      )}
+      {action.proposalContext && <ProposalContextView context={action.proposalContext} />}
       {error && <div className="pending-action-error">{error}</div>}
       <p className="pending-action-note">
         {!canApprove

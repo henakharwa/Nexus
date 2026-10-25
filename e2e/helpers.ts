@@ -91,13 +91,27 @@ export async function proposeAction(
   description: string,
   // What an approval rule decided, the way the server stores it when the agent proposes.
   rule?: { name: string; requiredApprovals: number },
+  // What the server stores as the exact change preview and why it was proposed.
+  details?: { changePreview?: unknown; proposalContext?: unknown },
 ): Promise<string> {
   return withDatabase(async (client) => {
     const conversation = await client.query(`SELECT id FROM conversations WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`, [workspaceId]);
     const created = await client.query(
-      `INSERT INTO pending_actions (workspace_id, conversation_id, tool_name, description, preview, args, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, required_approvals, approval_rule_name, approval_rule_id)
-       VALUES ($1, $2, 'create_issue', $3, $4, '{}'::jsonb, $5, $6, 'github', $5, $7, $8, $9) RETURNING id`,
-      [workspaceId, conversation.rows[0].id, description, `Title: ${description}`, requester.id, requester.name, rule?.requiredApprovals ?? 1, rule?.name ?? null, rule ? randomUUID() : null],
+      `INSERT INTO pending_actions (workspace_id, conversation_id, tool_name, description, preview, args, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, required_approvals, approval_rule_name, approval_rule_id, change_preview, proposal_context)
+       VALUES ($1, $2, 'create_issue', $3, $4, '{}'::jsonb, $5, $6, 'github', $5, $7, $8, $9, $10, $11) RETURNING id`,
+      [
+        workspaceId,
+        conversation.rows[0].id,
+        description,
+        `Title: ${description}`,
+        requester.id,
+        requester.name,
+        rule?.requiredApprovals ?? 1,
+        rule?.name ?? null,
+        rule ? randomUUID() : null,
+        details?.changePreview ? JSON.stringify(details.changePreview) : null,
+        details?.proposalContext ? JSON.stringify(details.proposalContext) : null,
+      ],
     );
     return created.rows[0].id as string;
   });
