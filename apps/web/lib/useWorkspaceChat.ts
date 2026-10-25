@@ -48,6 +48,8 @@ export interface WorkspaceChatState {
   // next successful send.
   sendError: string | null;
   historyLoaded: boolean;
+  /** Increments after a live socket reconnects (not on the initial load). */
+  reconnectVersion: number;
   // What teammates' agents and GitHub did recently in this workspace,
   // newest first; updated live.
   teamActivity: TeamActivity[];
@@ -84,10 +86,18 @@ export function useWorkspaceChat(
   const [teamActivity, setTeamActivity] = useState<TeamActivity[]>([]);
   const [generation, setGeneration] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
+  const connectedOnceRef = useRef(false);
+  const connectionKeyRef = useRef<string | null>(null);
+  const [reconnectVersion, setReconnectVersion] = useState(0);
 
   useEffect(() => {
     if (!workspaceId || !conversationId || !displayName) return;
     let active = true;
+    const connectionKey = `${workspaceId}:${conversationId}:${displayName}`;
+    if (connectionKeyRef.current !== connectionKey) {
+      connectionKeyRef.current = connectionKey;
+      connectedOnceRef.current = false;
+    }
     setStatus("connecting");
     setCloseReason(null);
     setMessages([]);
@@ -129,6 +139,8 @@ export function useWorkspaceChat(
     socketRef.current = ws;
 
     ws.onopen = () => {
+      if (connectedOnceRef.current) setReconnectVersion((version) => version + 1);
+      connectedOnceRef.current = true;
       setStatus("open");
       setReconnecting(false);
     };
@@ -254,6 +266,7 @@ export function useWorkspaceChat(
     agentBusy,
     sendError,
     historyLoaded,
+    reconnectVersion,
     teamActivity,
     sendMessage,
     reconnect,

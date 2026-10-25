@@ -113,6 +113,41 @@ export default function WorkspaceRoomPage() {
       .catch(() => {});
   }, [workspaceId]);
 
+  // A live socket is deliberately closed after a role or membership change.
+  // When the member chooses Reconnect, refresh the HTTP-backed room state as
+  // well; otherwise the socket has the new access while the page still shows
+  // the old members, role controls, and error state until a manual reload.
+  useEffect(() => {
+    if (chat.reconnectVersion === 0) return;
+    let cancelled = false;
+    Promise.all([
+      getWorkspace(workspaceId),
+      listWorkspaceMembers(workspaceId),
+      listConversations(workspaceId),
+      listIntegrations(workspaceId),
+    ])
+      .then(([nextWorkspace, members, nextConversations, nextIntegrations]) => {
+        if (cancelled) return;
+        setWorkspace(nextWorkspace);
+        setWorkspaceMembers(members);
+        setConversations(nextConversations);
+        setIntegrations(nextIntegrations);
+        setLoadError(null);
+        access.refresh();
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setLoadError(
+            err instanceof ApiError && err.status === 403
+              ? "You are not a member of this workspace. Join it with its join code or ask an Admin for an invitation."
+              : describeError(err, "Could not refresh this workspace."),
+          );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [access.refresh, chat.reconnectVersion, workspaceId]);
+
   useEffect(() => {
     listWorkspaceAgents(workspaceId)
       .then(setWorkspaceAgents)
