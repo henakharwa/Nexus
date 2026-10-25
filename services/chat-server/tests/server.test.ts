@@ -80,13 +80,14 @@ describe("REST routes", () => {
       },
     }));
     const browser = request.agent(app);
-    const start = await browser.get("/auth/login/github/start").query({ returnTo: "/?workspaceName=Team" });
+    const workspaceName = `Team ${Math.random().toString(36).slice(2)}`;
+    const start = await browser.get("/auth/login/github/start").query({ returnTo: `/?workspaceName=${workspaceName}` });
     const authorize = new URL(start.headers.location);
     expect(authorize.searchParams.get("redirect_uri")).toBe("http://localhost:4000/auth/github/callback");
     const callback = await browser.get("/auth/github/callback").query({ state: authorize.searchParams.get("state"), code: "test" });
-    expect(callback.headers.location).toBe("http://localhost:3000/?workspaceName=Team");
+    expect(callback.headers.location).toBe(`http://localhost:3000/?workspaceName=${encodeURIComponent(workspaceName)}`);
     expect((await browser.get("/auth/me")).body.displayName).toBe("Member");
-    const created = await browser.post("/workspaces").send({ name: "Team" });
+    const created = await browser.post("/workspaces").send({ name: workspaceName });
     expect(created.status).toBe(201);
     expect((await browser.get(`/workspaces/by-code/${created.body.joinCode}`)).status).toBe(200);
     expect((await browser.post("/auth/logout")).status).toBe(204);
@@ -104,9 +105,10 @@ describe("REST routes", () => {
   });
   it("creates a workspace and reads it back by id and by join code", async () => {
     const { app } = createChatServer(makeDeps());
-    const created = await request(app).post("/workspaces").set("Cookie", aliceCookie).send({ name: "Acme" });
+    const workspaceName = `Acme ${Math.random().toString(36).slice(2)}`;
+    const created = await request(app).post("/workspaces").set("Cookie", aliceCookie).send({ name: workspaceName });
     expect(created.status).toBe(201);
-    expect(created.body.name).toBe("Acme");
+    expect(created.body.name).toBe(workspaceName);
 
     const byId = await request(app).get(`/workspaces/${created.body.id}`).set("Cookie", aliceCookie);
     expect(byId.status).toBe(200);
