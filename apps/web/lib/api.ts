@@ -977,9 +977,9 @@ export async function logout(): Promise<void> {
 export type AccountSession = { createdAt: string; expiresAt: string; current: boolean };
 
 export async function listAccountSessions(): Promise<AccountSession[]> {
-  const result = (await parseJsonOrThrow(
-    await authenticatedFetch(`${CHAT_SERVER_URL}/auth/sessions`),
-  )) as { sessions: AccountSession[] };
+  const result = (await parseJsonOrThrow(await authenticatedFetch(`${CHAT_SERVER_URL}/auth/sessions`))) as {
+    sessions: AccountSession[];
+  };
   return result.sessions;
 }
 

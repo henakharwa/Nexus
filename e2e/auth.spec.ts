@@ -29,7 +29,7 @@ test.describe("sign-in", () => {
     await page.locator("#auth-email").fill(bob.email);
     await page.locator("#auth-password").fill("not-the-password");
     await page.getByRole("dialog").getByRole("button", { name: "Sign In", exact: true }).click();
-    await expect(page.getByText("Incorrect email or password.")).toBeVisible();
+    await expect(page.getByText("Invalid email or password.")).toBeVisible();
     await expect(page.getByTestId("create-workspace-btn")).toHaveCount(0);
   });
 
@@ -42,7 +42,7 @@ test.describe("sign-in", () => {
     await stranger.locator("#auth-email").fill(carol.email);
     await stranger.locator("#auth-password").fill("another-password-123");
     await stranger.getByRole("button", { name: "Create account" }).click();
-    await expect(stranger.getByText(/Unable to create an account with this email/)).toBeVisible();
+    await expect(stranger.getByText("Unable to create an account. Check your details and try again.")).toBeVisible();
     await expect(stranger.getByTestId("create-workspace-btn")).toHaveCount(0);
   });
 });
