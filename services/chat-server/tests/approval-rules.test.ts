@@ -2,7 +2,7 @@
 // input validation. Pure functions, no database.
 import { describe, it, expect } from "vitest";
 import type { ApprovalRule, ActionTarget } from "@mai-chat/shared-types";
-import { actionCategory, actionFacts, evaluateApprovalRules, globMatch, parseApprovalRuleInput, ruleMatches, standingScope, type ActionFacts } from "../src/approval-rules.js";
+import { actionCategory, actionFacts, evaluateApprovalRules, globMatch, parseApprovalRuleInput, ruleMatches, standingScope, describeRulesForAgent, summarizeRule, type ActionFacts } from "../src/approval-rules.js";
 import { describeActionTarget } from "../src/github-team.js";
 
 let seq = 0;
@@ -186,5 +186,39 @@ describe("standingScope", () => {
     expect(standingScope({ provider: "github", key: "k", label: "l", kind: "comment", repo: "Acme/Web" })).toEqual({ scope: "github:acme/web", label: "Acme/Web" });
     expect(standingScope({ provider: "slack", key: "k", label: "l", kind: "message", channel: "C024BE91L", channelName: "eng" })).toEqual({ scope: "slack:c024be91l", label: "#eng" });
     expect(standingScope({ provider: "linear", key: "k", label: "l", kind: "comment" })).toEqual({ scope: "linear", label: "Linear" });
+  });
+});
+
+describe("describeRulesForAgent", () => {
+  it("lists only enabled rules for this agent's tool, strictest first, in the Approvals page's wording", () => {
+    const rules = [
+      rule({ name: "Comments are fine", effect: "auto_approve", requiredApprovals: null, categories: ["comment"] }),
+      rule({ name: "Production merges", provider: "github", categories: ["merge"], branchPattern: "main", requiredApprovals: 2 }),
+      rule({ name: "No Slack posts to #announcements", provider: "slack", effect: "block", requiredApprovals: null, channelPattern: "announcements" }),
+      rule({ name: "Turned off", effect: "block", requiredApprovals: null, enabled: false }),
+      rule({ name: 'Block "deletes"', effect: "block", requiredApprovals: null, categories: ["delete"] }),
+    ];
+    expect(describeRulesForAgent(rules, "github")).toBe(
+      [
+        "- \"Block 'deletes'\": Any tool: delete or archive is blocked.",
+        '- "Production merges": GitHub: merge on main needs 2 approvals from people other than the requester.',
+        '- "Comments are fine": Any tool: comment runs without approval.',
+      ].join("\n")
+    );
+    expect(describeRulesForAgent(rules, "slack")).toContain("Slack: any action in #announcements is blocked.");
+    expect(describeRulesForAgent([rule({ provider: "slack" })], "github")).toBeNull();
+  });
+
+  it("keeps the list short and points to the Approvals page for the rest", () => {
+    const many = Array.from({ length: 25 }, (_, index) => rule({ name: `Rule ${index}` }));
+    const text = describeRulesForAgent(many, "github")!;
+    expect(text.split("\n")).toHaveLength(21);
+    expect(text).toContain("…and 5 more on the Approvals page.");
+  });
+
+  it("summarizes a rule the same way as the Approvals page", () => {
+    expect(summarizeRule({ provider: null, categories: [], repoPattern: "acme/*", branchPattern: "main, release/*", channelPattern: null, effect: "require_approvals", requiredApprovals: 1 })).toBe(
+      "Any tool: any action in acme/* on main, release/* needs 1 approval from people other than the requester."
+    );
   });
 });

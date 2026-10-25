@@ -375,3 +375,32 @@ describe("more precise matching", () => {
     expect(allowed).toMatchObject({ status: "completed", autoApproved: true });
   });
 });
+
+describe("the agent is told the rules", () => {
+  it("passes the rules for its tool to the agent turn, and none to read-only runs", async () => {
+    const seen: Array<string | null | undefined> = [];
+    // A read-only run needs at least one read tool, or it stops before the agent runs.
+    const readTool: ToolExecutor = { definition: { type: "function", function: { name: "list_commits", description: "List commits", parameters: { type: "object" } } }, execute: async () => [] };
+    const watchingApp = newApp({ githubMcpToolsFactory: async () => [readTool, writeTool], runAgentTurn: async (input) => {
+      seen.push(input.approvalRules);
+      return { reply: "ok", toolCallsMade: 0 };
+    } });
+    const ws = await makeWorkspace(watchingApp, requester);
+    await db.upsertGithubIntegration({ workspaceId: ws.id, owner: "acme", repo: "widgets", token: "gh-token-rules", connectionName: "GitHub", connectionScope: "personal", ownerUserId: requester.id });
+    await request(watchingApp).post(`/workspaces/${ws.id}/approval-rules`).set("Cookie", requester.cookie).send(ruleBody({ name: "Production merges", categories: ["merge"], branchPattern: "main" }));
+    await request(watchingApp).post(`/workspaces/${ws.id}/approval-rules`).set("Cookie", requester.cookie).send(ruleBody({ name: "Slack only", provider: "slack", effect: "block", requiredApprovals: null }));
+
+    const run = async (instructions: string) => {
+      const workflow = (await request(watchingApp).post(`/workspaces/${ws.id}/workflows`).set("Cookie", requester.cookie).send({ name: `Run ${seen.length}`, instructions, agentKind: "github" })).body;
+      const before = seen.length;
+      expect((await request(watchingApp).post(`/workspaces/${ws.id}/workflows/${workflow.id}/run`).set("Cookie", requester.cookie).send({})).status).toBe(202);
+      for (let i = 0; i < 100 && seen.length === before; i++) await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(seen.length).toBe(before + 1);
+      return seen[seen.length - 1];
+    };
+    const writing = await run("Merge pull request 4 when its checks pass.");
+    expect(writing).toContain('"Production merges": GitHub: merge on main needs 2 approvals');
+    expect(writing).not.toContain("Slack only");
+    expect(await run("Report on the recent commits.")).toBeNull();
+  });
+});

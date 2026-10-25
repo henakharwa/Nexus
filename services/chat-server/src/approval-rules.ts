@@ -258,3 +258,46 @@ export function starterRules(approvers: number): ApprovalRuleInput[] {
     { name: "Comments run without approval", enabled: true, provider: null, categories: ["comment"], repoPattern: null, branchPattern: null, channelPattern: null, effect: "auto_approve", requiredApprovals: null },
   ];
 }
+
+const PROVIDER_NAMES: Record<IntegrationType, string> = { github: "GitHub", slack: "Slack", linear: "Linear", notion: "Notion", figma: "Figma" };
+const CATEGORY_NAMES: Record<ApprovalActionCategory, string> = {
+  create: "create (issues, PRs)",
+  comment: "comment",
+  update: "update",
+  merge: "merge",
+  file_change: "file change / push",
+  branch: "create branch",
+  delete: "delete or archive",
+  message: "Slack message",
+  other: "other",
+};
+
+/** One line saying what a rule does, the same wording as the Approvals page. */
+export function summarizeRule(rule: Pick<ApprovalRule, "provider" | "categories" | "repoPattern" | "branchPattern" | "channelPattern" | "effect" | "requiredApprovals">): string {
+  const tool = rule.provider ? PROVIDER_NAMES[rule.provider] : "Any tool";
+  const kinds = rule.categories.length ? rule.categories.map((category) => CATEGORY_NAMES[category] ?? category).join(", ") : "any action";
+  const where = [rule.repoPattern ? `in ${rule.repoPattern}` : "", rule.branchPattern ? `on ${rule.branchPattern}` : "", rule.channelPattern ? `in #${rule.channelPattern.replace(/^#/, "")}` : ""].filter(Boolean).join(" ");
+  const what =
+    rule.effect === "block"
+      ? "is blocked"
+      : rule.effect === "auto_approve"
+        ? "runs without approval"
+        : `needs ${rule.requiredApprovals} approval${rule.requiredApprovals === 1 ? "" : "s"} from people other than the requester`;
+  return `${tool}: ${kinds}${where ? ` ${where}` : ""} ${what}.`;
+}
+
+const MAX_RULES_FOR_AGENT = 20;
+
+/**
+ * The workspace's active rules that can apply to this agent's tool, for its
+ * instructions, so it doesn't propose what a rule will block and can say
+ * what an action will need. Strictest first, since those matter most.
+ * Null when no rule applies.
+ */
+export function describeRulesForAgent(rules: ApprovalRule[], agentKind: IntegrationType): string | null {
+  const relevant = rules.filter((rule) => rule.enabled && (rule.provider === null || rule.provider === agentKind)).sort((a, b) => strictness(b) - strictness(a));
+  if (relevant.length === 0) return null;
+  const lines = relevant.slice(0, MAX_RULES_FOR_AGENT).map((rule) => `- "${rule.name.replace(/["\n]/g, "'")}": ${summarizeRule(rule)}`);
+  if (relevant.length > MAX_RULES_FOR_AGENT) lines.push(`- …and ${relevant.length - MAX_RULES_FOR_AGENT} more on the Approvals page.`);
+  return lines.join("\n");
+}

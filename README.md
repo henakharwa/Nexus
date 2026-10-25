@@ -1,5 +1,4 @@
 # Nexus -- shared agentic workspace
-Website - https://nexus-work.duckdns.org/
 
 A shared group-chat workspace where a team and an AI teammate work across
 GitHub, Slack, Linear, Notion and Figma together, live, in one channel. The
@@ -471,6 +470,12 @@ Notion, Figma) then run without a card. Standing approvals:
 **Expiry.** An action nobody approves within 24 hours is cancelled, and the
 room is told. Change the window with `ACTION_APPROVAL_TTL_HOURS` (1 to 720).
 Each card shows when it expires.
+
+**The agent knows the rules.** Each agent turn includes the active rules
+that can apply to that agent's tool, strictest first, so it doesn't propose
+what a rule will block. It tells you which rule stands in the way instead,
+and says how many approvals an action will need. Nexus still checks every
+rule itself; telling the agent only saves wasted proposals.
 
 **Who it runs as must still be allowed.** When an action is confirmed, the
 person it runs as must still be a member whose role may use that tool, so a

@@ -48,3 +48,31 @@ describe("versioned migrations", () => {
     await rm(path.join(dir, "9003_broken.sql"));
   });
 });
+
+describe("0007: databases migrated before the 0001_baseline edit", () => {
+  // Production applied 0001_baseline.sql before it was edited on 2026-10-08,
+  // so it logged "changed after it was applied" on every start.
+  const OLD_BASELINE = "3a818bdbbad064feb37993deca713442e2b3c71ffa7dbcc8b6ef1adbd8d74ea6";
+
+  it("adopts the edited baseline and stops the warning", async () => {
+    // Put this database back in production's state: the old checksum, the
+    // old column default, and 0007 not yet applied.
+    await getPool().query("UPDATE schema_migrations SET checksum = $1 WHERE version = '0001'", [OLD_BASELINE]);
+    await getPool().query("DELETE FROM schema_migrations WHERE version = '0007'");
+    await getPool().query(`ALTER TABLE workspace_permission_policies ALTER COLUMN editor_permissions SET DEFAULT '{"connectTools":true}'::jsonb`);
+
+    const firstRun: string[] = [];
+    expect(await runMigrations({ log: (message) => firstRun.push(message) })).toEqual(["0007"]);
+    // The run that applies 0007 still notices the old checksum once.
+    expect(firstRun.some((message) => message.includes("0001_baseline changed"))).toBe(true);
+
+    const nextRun: string[] = [];
+    expect(await runMigrations({ log: (message) => nextRun.push(message) })).toEqual([]);
+    expect(nextRun.filter((message) => message.startsWith("warning"))).toEqual([]);
+
+    const defaults = await getPool().query(
+      "SELECT column_default FROM information_schema.columns WHERE table_name = 'workspace_permission_policies' AND column_name = 'editor_permissions'"
+    );
+    expect(defaults.rows[0].column_default).toContain("manageWorkflows");
+  });
+});
