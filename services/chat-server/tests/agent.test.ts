@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { replyForResolvedActions, runAgentTurn, selectToolsForBudget, stripConfirmationBoilerplate } from "../src/agent.js";
+import { isPinnedTool, replyForResolvedActions, runAgentTurn, selectToolsForBudget, stripConfirmationBoilerplate } from "../src/agent.js";
 import type { ChatMessage, LlmChatFn } from "../src/llm-client.js";
 import type { ToolExecutor } from "../src/tools.js";
 
@@ -506,5 +506,61 @@ describe("replyForResolvedActions", () => {
 
   it("keeps the model reply when an action is still awaiting a decision", () => {
     expect(replyForResolvedActions([{ status: "pending" }], "github")).toBeNull();
+  });
+});
+
+describe("finding Slack channels by name", () => {
+  // Regression, found live 2026-10-24: "Post ... in #bugs" left Slack's
+  // channel-search tool out of a tight tool budget, so the agent looked for
+  // #bugs with message search, missed it (it had no messages) and proposed
+  // posting to #engineering instead.
+  const bigTool = (name: string, description: string, mutates = false): ToolExecutor => ({
+    definition: { type: "function", function: { name, description: `${description} ${"details ".repeat(300)}`, parameters: { type: "object", properties: {} } } },
+    mutates,
+    execute: async () => ({}),
+  });
+  const slackTools = [
+    bigTool("slack_send_message", "Post a message to a channel", true),
+    bigTool("slack_search_public", "Search messages in public channels"),
+    ...Array.from({ length: 10 }, (_, index) => bigTool(`slack_other_${index}`, "Post or search something else in Slack")),
+    bigTool("slack_search_channels", "Find conversations by name"),
+    bigTool("slack_read_channel", "Read conversation history"),
+  ];
+
+  it("always keeps the read-only channel tools, even when nothing in the request mentions them", () => {
+    const selected = selectToolsForBudget(slackTools, 'Post "Hello" in #bugs', 400).map((tool) => tool.definition.function.name);
+    expect(selected.length).toBeLessThan(slackTools.length);
+    expect(selected).toEqual(expect.arrayContaining(["slack_search_channels", "slack_read_channel"]));
+  });
+
+  it("keeps them even when the request doesn't name a channel at all", () => {
+    const selected = selectToolsForBudget(slackTools, "Tell the bugs team hello", 400).map((tool) => tool.definition.function.name);
+    expect(selected.length).toBeLessThan(slackTools.length);
+    expect(selected).toEqual(expect.arrayContaining(["slack_search_channels", "slack_read_channel"]));
+  });
+
+  it("pins only read-only Slack tools whose name is about channels", () => {
+    expect(isPinnedTool(bigTool("slack_search_channels", "x"))).toBe(true);
+    expect(isPinnedTool(bigTool("slack_post_to_channel", "x", true))).toBe(false);
+    expect(isPinnedTool(bigTool("list_channels", "x"))).toBe(false);
+  });
+
+  it("gives the Slack agent the looked-up channels and tells it never to substitute another", async () => {
+    let systemPrompt = "";
+    const chat: LlmChatFn = async (_config, messages) => {
+      systemPrompt = String(messages[0].content);
+      return { role: "assistant", content: "ok" };
+    };
+    await runAgentTurn({
+      history: [{ role: "user", content: 'Post "Hello" in #bugs and #nope' }],
+      tools: [],
+      agentKind: "slack",
+      slackChannels: "- #bugs = channel ID C0BUGS1234\n- #nope: not found among the channels this member can see",
+      chat,
+      llmConfig: { baseUrl: "http://example.invalid", apiKey: "k", model: "m", maxTokens: 10, tpmLimit: 8000 },
+    });
+    expect(systemPrompt).toContain("#bugs = channel ID C0BUGS1234");
+    expect(systemPrompt).toContain("never use a different channel instead");
+    expect(systemPrompt).toContain("Never post to a channel other than the one the person named");
   });
 });

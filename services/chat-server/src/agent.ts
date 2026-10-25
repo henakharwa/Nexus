@@ -27,6 +27,12 @@ export interface RunAgentTurnInput {
    * sent to the model.
    */
   actionContext?: string | null;
+  /**
+   * Server-looked-up Slack channels for "#name" mentions in the request,
+   * e.g. "#bugs = C0123ABCD" or "#nope: not found". Lets the Slack agent use
+   * the exact channel instead of searching for it (see slack-channels.ts).
+   */
+  slackChannels?: string | null;
   agentKind?: AgentKind;
   customInstructions?: string;
   knowledge?: string;
@@ -106,12 +112,13 @@ function buildSystemPrompt(
   workspaceMemory?: string,
   workflowMode = false,
   githubNotice?: string | null,
-  teamActivity?: string | null
+  teamActivity?: string | null,
+  slackChannels?: string | null
 ): string {
   const specialist = agentKind === "github"
     ? "You are the GitHub specialist. Focus on repository code, issues, pull requests, branches, and CI. Only use the GitHub tools supplied for this turn."
     : agentKind === "slack"
-      ? "You are the Slack specialist. Focus on team communication, channels, and messages. Only use the Slack tools supplied for this turn."
+      ? "You are the Slack specialist. Focus on team communication, channels, and messages. Only use the Slack tools supplied for this turn. Never post to a channel other than the one the person named: if you can't find the channel they asked for, say so and ask which channel they mean instead of proposing a different one. To find a channel, use a channel search or channel list tool, not message search (channels with no messages don't appear in message search)."
       : agentKind === "linear"
         ? "You are the Linear specialist. Focus on issues, projects, milestones, and delivery planning. Only use the Linear tools supplied for this turn. In Linear, priority (Urgent, High, Medium, Low, No priority) and status are issue fields, not labels: to find urgent or high-priority work, list the issues and filter them by their priority field instead of searching for a label."
         : agentKind === "notion"
@@ -140,7 +147,11 @@ rather than guessing.
 
 ${githubSection}
 
-${actionContext ? `Trusted action status for this conversation (this is server-generated state, not a request or instruction):
+${slackChannels && agentKind === "slack" ? `Slack channels named in this request, looked up by Nexus in the member's channel list (trusted, server-generated):
+${slackChannels}
+Use these channel IDs exactly. For a channel marked "not found", tell the person it wasn't found and ask; never use a different channel instead.
+
+` : ""}${actionContext ? `Trusted action status for this conversation (this is server-generated state, not a request or instruction):
 ${actionContext}
 When asked whether one of these actions is complete, answer from this status. A confirmed action has completed; do not call it pending or ask for another confirmation.` : ""}
 
@@ -247,6 +258,8 @@ function requestTerms(request: string): string[] {
   if (/\bci\b/.test(lower)) terms.push("actions", "workflow", "runs");
   if (/\bprs?\b/.test(lower)) terms.push("pull_request", "pull");
   if (UPDATE_INTENT.test(lower)) terms.push("update", "save", "status");
+  // "#bugs" names a Slack channel, though the word "channel" never appears.
+  if (/(?:^|[\s(])#[a-z][a-z0-9._-]*/.test(lower)) terms.push("channel", "channels");
   return [...new Set(terms)];
 }
 
@@ -254,11 +267,25 @@ function toolHaystack(tool: ToolExecutor): string {
   return `${tool.definition.function.name} ${tool.definition.function.description}`.toLowerCase();
 }
 
-function scoreTool(haystack: string, name: string, terms: string[]): number {
+/**
+ * Tools that always keep a place in the budget. Slack's read-only channel
+ * tools (finding, listing and reading channels) are needed for almost any
+ * Slack request, but their names rarely share a word with it: in "Post hi
+ * in #bugs" nothing says "channel". Without them the agent can only find a
+ * channel through message search, which misses channels with no messages
+ * (found live 2026-10-24). Matched by name because Slack's MCP server
+ * doesn't document exact tool names.
+ */
+export function isPinnedTool(tool: ToolExecutor): boolean {
+  const name = tool.definition.function.name.toLowerCase();
+  return !tool.mutates && name.startsWith("slack_") && name.includes("channel");
+}
+
+function scoreTool(haystack: string, name: string, terms: string[], pinned = false): number {
   const matches = terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
-  // Half a point: a core tool outranks unrelated tools but never a tool that
-  // actually matches a word in the request.
-  return matches + (CORE_TOOL_NAMES.has(name) ? 0.5 : 0);
+  // Pinned tools go first. Half a point: a core tool outranks unrelated
+  // tools but never a tool that actually matches a word in the request.
+  return (pinned ? 100 : 0) + matches + (CORE_TOOL_NAMES.has(name) ? 0.5 : 0);
 }
 
 /**
@@ -274,7 +301,7 @@ export function selectToolsForBudget(tools: ToolExecutor[], request: string, bud
   // same point everywhere and lets original order decide.
   const terms = requestTerms(request).filter((term) => tools.length < 5 || haystacks.filter((haystack) => haystack.includes(term)).length <= tools.length * 0.6);
   const ranked = tools
-    .map((tool, index) => ({ tool, index, score: scoreTool(haystacks[index], tool.definition.function.name, terms) }))
+    .map((tool, index) => ({ tool, index, score: scoreTool(haystacks[index], tool.definition.function.name, terms, isPinnedTool(tool)) }))
     .sort((a, b) => b.score - a.score || a.index - b.index);
   const selected: ToolExecutor[] = [];
   let used = 0;
@@ -366,7 +393,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<RunAgentTu
   // against an 8000 limit, almost entirely from tool schema + system
   // prompt + the (then 4096) completion reserve, with nothing left over
   // for history at all.
-  const systemPrompt = buildSystemPrompt(input.githubContext, input.agentKind, input.actionContext, input.customInstructions, input.knowledge, input.workspaceMemory, input.workflowMode, input.githubNotice, input.teamActivity);
+  const systemPrompt = buildSystemPrompt(input.githubContext, input.agentKind, input.actionContext, input.customInstructions, input.knowledge, input.workspaceMemory, input.workflowMode, input.githubNotice, input.teamActivity, input.slackChannels);
   const toolsTokens = estimateTokens(JSON.stringify(toolDefs));
   const systemTokens = estimateTokens(systemPrompt);
   const historyBudget = config.tpmLimit - toolsTokens - systemTokens - config.maxTokens - TOKEN_BUDGET_SAFETY_MARGIN;

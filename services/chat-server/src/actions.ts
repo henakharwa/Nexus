@@ -66,6 +66,8 @@ export interface WorkspaceTools {
   // action lands on and what GitHub requires there, and Slack channel names.
   githubLookups?: GithubLookups;
   slackChannelName?: (channelId: string) => Promise<string | null>;
+  // Channel IDs for "#name" mentions, from Slack's channel list.
+  findSlackChannels?: (names: string[]) => Promise<Record<string, string | null>>;
 }
 
 export interface GithubLookups {
@@ -109,6 +111,7 @@ export async function buildToolsForWorkspace(workspaceId: string, deps: CreateSe
   let listOpenIssues: WorkspaceTools["listOpenIssues"];
   let githubLookups: GithubLookups | undefined;
   let slackChannelName: WorkspaceTools["slackChannelName"];
+  let findSlackChannels: WorkspaceTools["findSlackChannels"];
   const actingUser = requestingUserId ? await db.getUserById(requestingUserId) : null;
 
   // GitHub: the one repository this member chose, through their own account.
@@ -159,6 +162,8 @@ export async function buildToolsForWorkspace(workspaceId: string, deps: CreateSe
           const lookup = deps.slackChannelLookup;
           const slackToken = credential.token;
           if (lookup) slackChannelName = (channelId) => lookup(slackToken, channelId).catch(() => null);
+          const finder = deps.slackChannelFinder;
+          if (finder) findSlackChannels = (names) => finder(slackToken, names).catch(() => ({}));
         } catch (err) {
           // Same fail-open-without-Slack-tools policy as the GitHub MCP
           // branch above: an unreachable Slack MCP server (a revoked/
@@ -202,7 +207,7 @@ export async function buildToolsForWorkspace(workspaceId: string, deps: CreateSe
     }
   }
 
-  return { tools, githubTools: githubAgentTools, slackTools: slackAgentTools, linearTools: remoteAgentTools.linear, notionTools: remoteAgentTools.notion, figmaTools: remoteAgentTools.figma, githubContext, githubNotice, accounts, listOpenIssues, githubLookups, slackChannelName };
+  return { tools, githubTools: githubAgentTools, slackTools: slackAgentTools, linearTools: remoteAgentTools.linear, notionTools: remoteAgentTools.notion, figmaTools: remoteAgentTools.figma, githubContext, githubNotice, accounts, listOpenIssues, githubLookups, slackChannelName, findSlackChannels };
 }
 
 export const PROVIDER_LABELS: Record<IntegrationType, string> = { github: "GitHub", slack: "Slack", linear: "Linear", notion: "Notion", figma: "Figma" };
@@ -391,7 +396,11 @@ async function enrichTarget(
   }
   if (target.provider === "slack" && options?.slackChannelName && target.channel) {
     const channel = target.channel.replace(/^#/, "");
-    if (isSlackId(channel)) enriched.channelName = (await options.slackChannelName(channel).catch(() => null)) ?? undefined;
+    if (isSlackId(channel)) {
+      enriched.channelName = (await options.slackChannelName(channel).catch(() => null)) ?? undefined;
+      // Show "#bugs" on the card rather than the raw ID.
+      if (enriched.channelName) enriched.label = `#${enriched.channelName}`;
+    }
   }
   return enriched;
 }
