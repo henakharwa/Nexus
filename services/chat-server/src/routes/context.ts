@@ -12,4 +12,6 @@ export interface RouteContext {
   requireRole(req: Request, res: Response, allowed: Array<"admin" | "editor">): Promise<boolean>;
   /** Same guard, but checks a saved permission (Admins hold all). */
   requirePermission(req: Request, res: Response, permission: keyof WorkspacePermissions): Promise<boolean>;
+  /** Ends live sockets after an Admin changes or removes a member. */
+  disconnectWorkspaceMember?(workspaceId: string, userId: string, reason: string): void;
 }

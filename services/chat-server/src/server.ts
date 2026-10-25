@@ -68,7 +68,10 @@ export {
 // The landing page stays public. OAuth login reuses the integration callback,
 // with a login-prefixed state distinguishing authentication from repo access.
 
-export function createApp(deps: CreateServerDeps = defaultDeps) {
+export function createApp(
+  deps: CreateServerDeps = defaultDeps,
+  realtime?: { disconnectWorkspaceMember(workspaceId: string, userId: string, reason: string): void },
+) {
   const app = express();
   // Browser Origin never includes a trailing slash. Normalizing the
   // configured URL avoids rejecting legitimate deployed requests when a
@@ -220,7 +223,14 @@ export function createApp(deps: CreateServerDeps = defaultDeps) {
 
   // Routes live in ./routes/*, grouped by feature area. Order matches the
   // original single-file registration order.
-  const routeContext: RouteContext = { app, deps, webAppUrl, requireRole, requirePermission };
+  const routeContext: RouteContext = {
+    app,
+    deps,
+    webAppUrl,
+    requireRole,
+    requirePermission,
+    disconnectWorkspaceMember: realtime?.disconnectWorkspaceMember,
+  };
   registerPublicRoutes(routeContext);
   registerNotificationsRoutes(routeContext);
   registerWorkspacesRoutes(routeContext);
@@ -304,6 +314,8 @@ export function registerDashboardBroadcastRoutes(app: Express, rooms: RoomRegist
 // room and sent to the LLM, so an unbounded one is a cheap way to fill the
 // database and run up model costs.
 export const MAX_CHAT_MESSAGE_CHARS = 20_000;
+export const CHAT_MESSAGES_PER_CONNECTION_PER_MINUTE = 60;
+const CHAT_MESSAGE_RATE_WINDOW_MS = 60_000;
 // Largest raw WebSocket frame. Generous for a 20,000-character message in
 // JSON (multi-byte characters included), far below ws's 100 MiB default.
 const MAX_WS_PAYLOAD_BYTES = 256 * 1024;
@@ -322,14 +334,28 @@ function sendSafely(ws: WebSocket, payload: unknown): void {
   }
 }
 
+/** In-memory on purpose: this protects a single open socket from flooding a room. */
+export function createConnectionMessageRateLimiter() {
+  const timestamps: number[] = [];
+  return {
+    allow(now = Date.now()): boolean {
+      const oldestAllowed = now - CHAT_MESSAGE_RATE_WINDOW_MS;
+      while (timestamps[0] !== undefined && timestamps[0] <= oldestAllowed) timestamps.shift();
+      if (timestamps.length >= CHAT_MESSAGES_PER_CONNECTION_PER_MINUTE) return false;
+      timestamps.push(now);
+      return true;
+    },
+  };
+}
+
 export function createChatServer(deps: CreateServerDeps = defaultDeps) {
-  const app = createApp(deps);
-  const server = createServer(app);
-  const wss = new WebSocketServer({ server, path: "/ws", maxPayload: MAX_WS_PAYLOAD_BYTES });
   // In production, live events and the agent-turn lock are shared through
   // Postgres so the service can run as more than one process.
   const roomBus = realtimeBusEnabled() ? createPostgresRoomBus() : undefined;
   const rooms = new RoomRegistry(roomBus);
+  const app = createApp(deps, { disconnectWorkspaceMember: rooms.disconnectMember.bind(rooms) });
+  const server = createServer(app);
+  const wss = new WebSocketServer({ server, path: "/ws", maxPayload: MAX_WS_PAYLOAD_BYTES });
   registerActionRoutes(app, deps, rooms);
   registerDashboardBroadcastRoutes(app, rooms);
 
@@ -346,6 +372,11 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
   // disconnect.
   type HeartbeatSocket = WebSocket & { isAlive?: boolean };
   const HEARTBEAT_INTERVAL_MS = 30_000;
+  const IDLE_SESSION_RECHECK_MS = 5 * 60_000;
+  const socketSecurity = new WeakMap<
+    WebSocket,
+    { sessionToken: string; lastSessionCheckAt: number; sessionCheckInFlight: boolean }
+  >();
   const heartbeat = setInterval(() => {
     for (const client of wss.clients) {
       const socket = client as HeartbeatSocket;
@@ -355,6 +386,25 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       }
       socket.isAlive = false;
       socket.ping();
+      const security = socketSecurity.get(socket);
+      if (
+        security &&
+        !security.sessionCheckInFlight &&
+        Date.now() - security.lastSessionCheckAt >= IDLE_SESSION_RECHECK_MS
+      ) {
+        security.sessionCheckInFlight = true;
+        void db
+          .getUserBySessionToken(security.sessionToken)
+          .then((user) => {
+            if (!user && (socket.readyState === socket.OPEN || socket.readyState === socket.CONNECTING))
+              socket.close(4001, "Sign in required");
+          })
+          .catch((error) => console.error("idle session recheck failed", error))
+          .finally(() => {
+            security.lastSessionCheckAt = Date.now();
+            security.sessionCheckInFlight = false;
+          });
+      }
     }
     rooms.refreshPresence();
   }, HEARTBEAT_INTERVAL_MS);
@@ -902,6 +952,7 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     // handler below replaces it and flushes the queue in order.
     const earlyMessages: Buffer[] = [];
     let handleMessage: ((raw: Buffer) => void) | null = null;
+    const messageRateLimiter = createConnectionMessageRateLimiter();
     ws.on("message", (raw: Buffer) => {
       if (handleMessage) handleMessage(raw);
       else earlyMessages.push(raw);
@@ -913,7 +964,7 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       const conversationId = url.searchParams.get("conversationId") ?? "";
       const sessionToken = parseSessionToken(req.headers.cookie);
       const user = sessionToken ? await db.getUserBySessionToken(sessionToken) : null;
-      if (!user) {
+      if (!sessionToken || !user) {
         ws.close(4001, "Sign in required");
         return;
       }
@@ -940,6 +991,7 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
         ws.close(4003, "Join this workspace with its code or an invitation first");
         return;
       }
+      socketSecurity.set(ws, { sessionToken, lastSessionCheckAt: Date.now(), sessionCheckInFlight: false });
       const participant: Participant = {
         clientId: randomUUID(),
         userId: user.id,
@@ -970,6 +1022,15 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
           }
           if (parsed.type !== "chat" || typeof parsed.content !== "string" || !parsed.content.trim()) {
             ws.send(JSON.stringify({ type: "error", error: "expected {type: 'chat', content: string}" }));
+            return;
+          }
+          if (!messageRateLimiter.allow()) {
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                error: "You're sending messages too quickly. Please wait a moment and try again.",
+              }),
+            );
             return;
           }
           const content = parsed.content.trim();

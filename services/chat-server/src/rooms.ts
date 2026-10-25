@@ -11,7 +11,8 @@ interface Connection {
 // instance needs.
 export type BusMessage =
   | { kind: "broadcast"; room: string; payload: unknown }
-  | { kind: "presence"; room: string; instanceId: string; participants: Participant[] };
+  | { kind: "presence"; room: string; instanceId: string; participants: Participant[] }
+  | { kind: "disconnect_member"; room: string; userId: string; reason: string };
 export interface RoomBus {
   readonly instanceId: string;
   publish(message: BusMessage): Promise<void>;
@@ -37,6 +38,7 @@ export class RoomRegistry {
   constructor(private readonly bus?: RoomBus) {
     bus?.subscribe((message) => {
       if (message.kind === "broadcast") this.deliverLocal(message.room, message.payload);
+      else if (message.kind === "disconnect_member") this.disconnectLocalMember(message.room, message.userId, message.reason);
       else if (message.instanceId !== bus.instanceId) {
         const byInstance = this.remotePresence.get(message.room) ?? new Map();
         byInstance.set(message.instanceId, { participants: message.participants, at: Date.now() });
@@ -140,6 +142,28 @@ export class RoomRegistry {
         room.delete(conn);
         break;
       }
+    }
+    if (room.size === 0) this.rooms.delete(workspaceId);
+    this.publishPresence(workspaceId);
+  }
+
+  /** Immediately removes every local socket a member has open in a workspace. */
+  disconnectMember(workspaceId: string, userId: string, reason: string): void {
+    this.disconnectLocalMember(workspaceId, userId, reason);
+    if (this.bus)
+      void this.bus
+        .publish({ kind: "disconnect_member", room: workspaceId, userId, reason })
+        .catch((error) => console.error("member disconnect publish failed", error));
+  }
+
+  private disconnectLocalMember(workspaceId: string, userId: string, reason: string): void {
+    const room = this.rooms.get(workspaceId);
+    if (!room) return;
+    for (const conn of room) {
+      if (conn.participant.userId !== userId) continue;
+      room.delete(conn);
+      if (conn.ws.readyState === conn.ws.OPEN || conn.ws.readyState === conn.ws.CONNECTING)
+        conn.ws.close(4009, reason);
     }
     if (room.size === 0) this.rooms.delete(workspaceId);
     this.publishPresence(workspaceId);

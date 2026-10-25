@@ -295,6 +295,45 @@ describe("real-time shared chat over WebSocket", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
+  it("closes a member's live socket immediately when an Admin changes their role or removes them", async () => {
+    const { server, app } = createChatServer(makeDeps());
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const port = (server.address() as { port: number }).port;
+    const workspace = await createTestWorkspace(app);
+    const member = (await request(app).get(`/workspaces/${workspace.id}/members`).set("Cookie", aliceCookie)).body.find(
+      (entry: { displayName: string }) => entry.displayName === "Bob",
+    ) as { id: string };
+
+    const openSocket = async () => {
+      const socket = new WebSocket(
+        `ws://localhost:${port}/ws?workspaceId=${workspace.id}&conversationId=${workspace.conversationId}`,
+        { headers: { Cookie: bobCookie } },
+      );
+      const ready = new Promise<void>((resolve) => {
+        socket.on("message", (data) => {
+          if ((JSON.parse(data.toString()) as { type?: string }).type === "history") resolve();
+        });
+      });
+      await new Promise((resolve) => socket.on("open", resolve));
+      await ready;
+      return socket;
+    };
+
+    const roleSocket = await openSocket();
+    const roleClosed = new Promise<number>((resolve) => roleSocket.on("close", (code) => resolve(code)));
+    expect(
+      (await request(app).patch(`/workspaces/${workspace.id}/members/${member.id}`).set("Cookie", aliceCookie).send({ role: "admin" }))
+        .status,
+    ).toBe(204);
+    expect(await roleClosed).toBe(4009);
+
+    const removedSocket = await openSocket();
+    const removedClosed = new Promise<number>((resolve) => removedSocket.on("close", (code) => resolve(code)));
+    expect((await request(app).delete(`/workspaces/${workspace.id}/members/${member.id}`).set("Cookie", aliceCookie)).status).toBe(204);
+    expect(await removedClosed).toBe(4009);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
   it("a second connection with the same displayName replaces the first instead of appearing as a duplicate", async () => {
     const { server, app } = createChatServer(makeDeps());
     await new Promise<void>((resolve) => server.listen(0, resolve));

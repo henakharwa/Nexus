@@ -4,7 +4,7 @@ import { UUID_RE, paramString } from "../http-utils.js";
 import type { Request, Response } from "express";
 import type { RouteContext } from "./context.js";
 
-export function registerMembersRoutes({ app, requireRole }: RouteContext): void {
+export function registerMembersRoutes({ app, requireRole, disconnectWorkspaceMember }: RouteContext): void {
   app.patch("/workspaces/:id/members/:userId", async (req: Request, res: Response) => {
     if (!(await requireRole(req, res, ["admin"]))) return;
     const role = req.body?.role;
@@ -20,6 +20,7 @@ export function registerMembersRoutes({ app, requireRole }: RouteContext): void 
       return res.status(409).json({ error: "A workspace must keep at least one admin." });
     }
     await db.setWorkspaceMemberRole(paramString(req.params.id), target.id, role);
+    disconnectWorkspaceMember?.(paramString(req.params.id), target.id, "Your workspace role changed. Please reconnect.");
     await db.recordAuditEvent({
       workspaceId: paramString(req.params.id),
       eventType: "member.role_changed",
@@ -42,6 +43,7 @@ export function registerMembersRoutes({ app, requireRole }: RouteContext): void 
       return res.status(409).json({ error: "A workspace must keep at least one admin." });
     if (!(await db.removeWorkspaceMemberAndPersonalIntegrations(workspaceId, userId)))
       return res.status(404).json({ error: "member not found" });
+    disconnectWorkspaceMember?.(workspaceId, userId, "You were removed from this workspace.");
     await db.recordAuditEvent({
       workspaceId,
       eventType: "member.removed",
