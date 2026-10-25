@@ -10,7 +10,13 @@ function request(app: express.Express) {
   return agents.get(app)!;
 }
 import { getPool, closePool, createSession, getUserBySessionToken, pruneExpiredSessions } from "@mai-chat/db";
-import { registerUserAuthRoutes, attachUser, requireAuth, type UserAuthConfig, type UserAuthDeps } from "../src/auth.js";
+import {
+  registerUserAuthRoutes,
+  attachUser,
+  requireAuth,
+  type UserAuthConfig,
+  type UserAuthDeps,
+} from "../src/auth.js";
 
 loadEnv({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 loadEnv();
@@ -45,7 +51,13 @@ function makeApp(deps: UserAuthDeps) {
 
 const okDeps: UserAuthDeps = {
   exchangeCodeForToken: async () => ({ accessToken: "gho_real-token" }),
-  fetchGithubUser: async () => ({ githubId: "12345", email: "octocat@example.test", username: "octocat", displayName: "The Octocat", avatarUrl: "https://example.com/a.png" }),
+  fetchGithubUser: async () => ({
+    githubId: "12345",
+    email: "octocat@example.test",
+    username: "octocat",
+    displayName: "The Octocat",
+    avatarUrl: "https://example.com/a.png",
+  }),
 };
 
 beforeAll(async () => {
@@ -82,13 +94,19 @@ describe("GET /auth/login/github/start", () => {
     const relativeState = new URL(relative.headers.location).searchParams.get("state")!;
 
     const externalApp = makeApp(okDeps);
-    const external = await request(externalApp).get("/auth/login/github/start").query({ returnTo: "https://evil.example/steal" });
+    const external = await request(externalApp)
+      .get("/auth/login/github/start")
+      .query({ returnTo: "https://evil.example/steal" });
     const externalState = new URL(external.headers.location).searchParams.get("state")!;
 
-    const relativeCallback = await request(app).get("/auth/login/github/callback").query({ code: "c1", state: relativeState });
+    const relativeCallback = await request(app)
+      .get("/auth/login/github/callback")
+      .query({ code: "c1", state: relativeState });
     expect(new URL(relativeCallback.headers.location).pathname).toBe("/w/abc-123");
 
-    const externalCallback = await request(externalApp).get("/auth/login/github/callback").query({ code: "c2", state: externalState });
+    const externalCallback = await request(externalApp)
+      .get("/auth/login/github/callback")
+      .query({ code: "c2", state: externalState });
     const externalLocation = new URL(externalCallback.headers.location);
     expect(externalLocation.origin).toBe(config.webAppUrl);
     expect(externalLocation.pathname).toBe("/");
@@ -134,7 +152,8 @@ describe("GET /auth/login/github/callback", () => {
     expect(res.status).toBe(302);
     expect(new URL(res.headers.location).pathname).toBe("/");
 
-    const cookieHeader = (Array.isArray(res.headers["set-cookie"]) ? res.headers["set-cookie"][0] : res.headers["set-cookie"]) ?? "";
+    const cookieHeader =
+      (Array.isArray(res.headers["set-cookie"]) ? res.headers["set-cookie"][0] : res.headers["set-cookie"]) ?? "";
     expect(cookieHeader).toContain("mai_session=");
     expect(cookieHeader).toMatch(/HttpOnly/i);
     expect(cookieHeader).not.toMatch(/Secure/i); // secureCookie: false in this config
@@ -198,7 +217,9 @@ describe("GET /auth/login/github/callback", () => {
 
   it("rejects an unknown/missing state the same way", async () => {
     const app = makeApp(okDeps);
-    const res = await request(app).get("/auth/login/github/callback").query({ code: "code", state: "not-a-real-state" });
+    const res = await request(app)
+      .get("/auth/login/github/callback")
+      .query({ code: "code", state: "not-a-real-state" });
     const location = new URL(res.headers.location);
     expect(location.searchParams.get("loginError")).toContain("expired or was already used");
   });
@@ -254,16 +275,28 @@ describe("session management", () => {
   it("lists sessions without exposing tokens, signs out other devices, and prunes expired records", async () => {
     const app = makeApp({
       ...okDeps,
-      fetchGithubUser: async () => ({ githubId: `sessions-${Date.now()}`, email: `sessions-${Date.now()}@example.test`, username: "sessions", displayName: "Sessions" }),
+      fetchGithubUser: async () => ({
+        githubId: `sessions-${Date.now()}`,
+        email: `sessions-${Date.now()}@example.test`,
+        username: "sessions",
+        displayName: "Sessions",
+      }),
     });
     const start = await request(app).get("/auth/login/github/start");
-    const callback = await request(app).get("/auth/login/github/callback").query({ code: "good-code", state: new URL(start.headers.location).searchParams.get("state") });
+    const callback = await request(app)
+      .get("/auth/login/github/callback")
+      .query({ code: "good-code", state: new URL(start.headers.location).searchParams.get("state") });
     const cookie = extractCookie(callback);
     const currentToken = cookie.split("=")[1];
     const currentUser = await getUserBySessionToken(currentToken);
     expect(currentUser).not.toBeNull();
-    const other = await createSession(currentUser!.id, 60_000);
     const expired = await createSession(currentUser!.id, -1_000);
+    // Cleanup is deliberately out of the request path. Prove the scheduled
+    // worker's DB operation removes an expired record before session revocation
+    // is measured, otherwise revoke-others correctly counts the expired row.
+    expect(await pruneExpiredSessions()).toBeGreaterThanOrEqual(1);
+    expect(await getUserBySessionToken(expired.token)).toBeNull();
+    const other = await createSession(currentUser!.id, 60_000);
 
     const listed = await request(app).get("/auth/sessions").set("Cookie", cookie);
     expect(listed.status).toBe(200);
@@ -277,8 +310,6 @@ describe("session management", () => {
     expect(revoked.body).toEqual({ revoked: 1 });
     expect(await getUserBySessionToken(other.token)).toBeNull();
     expect(await getUserBySessionToken(currentToken)).not.toBeNull();
-    expect(await pruneExpiredSessions()).toBeGreaterThanOrEqual(1);
-    expect(await getUserBySessionToken(expired.token)).toBeNull();
   });
 });
 
@@ -302,4 +333,3 @@ describe("POST /auth/logout", () => {
     expect(meAfter.status).toBe(401);
   });
 });
-
