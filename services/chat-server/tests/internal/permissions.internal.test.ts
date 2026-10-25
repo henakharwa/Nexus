@@ -2,7 +2,7 @@
 // plus the Editor permission-request flow.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
-import { closePool } from "@mai-chat/db";
+import { closePool, setWorkspaceMemberPermissionGrant } from "@mai-chat/db";
 import { setupDatabase, makeUser, newApp, makeWorkspace, grantEditor, NIL_UUID, type TestUser } from "./helpers.js";
 
 const app = newApp();
@@ -42,21 +42,29 @@ const as = (user: TestUser) => ({
 });
 
 describe("PM-01 effective access", () => {
-  it("basic: Admin holds every permission; Editor holds the default Editor policy", async () => {
-    const a = await as(admin).get(`/workspaces/${ws.id}/access`);
-    expect(a.body.role).toBe("admin");
-    expect(Object.values(a.body.permissions).every(Boolean)).toBe(true);
-    const e = await as(editor).get(`/workspaces/${ws.id}/access`);
-    expect(e.body.role).toBe("editor");
-    expect(e.body.permissions).toMatchObject({
+  it("basic: the table-driven role matrix gives Admins every capability and Editors only the configured baseline", async () => {
+    const editorBaseline = {
+      connectTools: true,
       createAgents: false,
       publishAgents: false,
       manageWorkflows: false,
       manageMemory: true,
       manageArtifacts: true,
       approveActions: false,
-      connectTools: true,
-    });
+      github: true,
+      slack: true,
+      linear: true,
+      notion: true,
+      figma: true,
+    };
+    const a = await as(admin).get(`/workspaces/${ws.id}/access`);
+    expect(a.body.role).toBe("admin");
+    const e = await as(editor).get(`/workspaces/${ws.id}/access`);
+    expect(e.body.role).toBe("editor");
+    for (const [permission, editorAllowed] of Object.entries(editorBaseline)) {
+      expect(a.body.permissions[permission], `Admin ${permission}`).toBe(true);
+      expect(e.body.permissions[permission], `Editor ${permission}`).toBe(editorAllowed);
+    }
   });
   it("security: outsiders get 403 on every shared read", async () => {
     for (const path of [
@@ -172,7 +180,9 @@ describe("PM-03 conditional Editor features", () => {
 });
 
 describe("PM-04 permission requests", () => {
-  it("basic: Editor asks, Admin approves, Editor gains the permission and is notified", async () => {
+  it("basic: Admin approval grants only the requesting Editor and not every Editor", async () => {
+    const otherEditor = await makeUser("Other Editor");
+    expect((await as(otherEditor).post(`/workspaces/by-code/${ws.joinCode}/join`)).status).toBe(200);
     const asked = await as(editor).post(`/workspaces/${ws.id}/permission-requests`, {
       permission: "approveActions",
       reason: "I review deploys",
@@ -184,9 +194,29 @@ describe("PM-04 permission requests", () => {
       204,
     );
     expect((await as(editor).get(`/workspaces/${ws.id}/access`)).body.permissions.approveActions).toBe(true);
+    expect((await as(otherEditor).get(`/workspaces/${ws.id}/access`)).body.permissions.approveActions).toBe(false);
+    expect(
+      (await as(admin).get(`/workspaces/${ws.id}/members/${editor.id}/permission-grants`)).body.permissions,
+    ).toContain("approveActions");
+    expect(
+      (
+        await as(admin).put(`/workspaces/${ws.id}/members/${otherEditor.id}/permission-grants/createAgents`, {
+          granted: true,
+        })
+      ).status,
+    ).toBe(204);
+    expect((await as(otherEditor).get(`/workspaces/${ws.id}/access`)).body.permissions.createAgents).toBe(true);
+    expect(
+      (
+        await as(admin).put(`/workspaces/${ws.id}/members/${otherEditor.id}/permission-grants/createAgents`, {
+          granted: false,
+        })
+      ).status,
+    ).toBe(204);
+    expect((await as(otherEditor).get(`/workspaces/${ws.id}/access`)).body.permissions.createAgents).toBe(false);
     const notes = await as(editor).get(`/notifications?workspaceId=${ws.id}`);
-    expect(JSON.stringify(notes.body)).toMatch(/approved your request for approveActions/);
-    await grantEditor(ws.id, { approveActions: false });
+    expect(JSON.stringify(notes.body)).toMatch(/granted you approveActions/);
+    await setWorkspaceMemberPermissionGrant(ws.id, editor.id, "approveActions", false);
   });
   it("basic: Admin rejects; the permission stays off and the request cannot be decided twice", async () => {
     const asked = await as(editor).post(`/workspaces/${ws.id}/permission-requests`, {
@@ -253,5 +283,59 @@ describe("PM-04 permission requests", () => {
         .status,
     ).toBe(403);
     expect((await as(editor).post(`/workspaces/${ws.id}/permission-requests/${NIL_UUID}/approve`)).status).toBe(403);
+  });
+});
+
+describe("PM-05 ownership boundaries", () => {
+  it("security: an Editor with the capability can edit their own agent and workflow, but not a teammate's; an Admin can manage both", async () => {
+    const peer = await makeUser("Peer Editor");
+    expect((await as(peer).post(`/workspaces/by-code/${ws.joinCode}/join`)).status).toBe(200);
+    for (const userId of [editor.id, peer.id]) {
+      await setWorkspaceMemberPermissionGrant(ws.id, userId, "createAgents", true);
+      await setWorkspaceMemberPermissionGrant(ws.id, userId, "manageWorkflows", true);
+    }
+
+    const agent = await as(editor).post(`/workspaces/${ws.id}/agents`, {
+      name: "Owner-only agent",
+      baseAgent: "project",
+      instructions: "Keep the release notes accurate.",
+    });
+    expect(agent.status).toBe(201);
+    expect((await as(peer).patch(`/workspaces/${ws.id}/agents/${agent.body.id}`, { name: "Hijacked" })).status).toBe(
+      403,
+    );
+    expect((await as(peer).delete(`/workspaces/${ws.id}/agents/${agent.body.id}`)).status).toBe(403);
+    expect(
+      (await as(editor).patch(`/workspaces/${ws.id}/agents/${agent.body.id}`, { name: "Editor-owned agent" })).status,
+    ).toBe(200);
+    expect(
+      (await as(admin).patch(`/workspaces/${ws.id}/agents/${agent.body.id}`, { name: "Admin-managed agent" })).status,
+    ).toBe(200);
+
+    const workflowBody = {
+      name: "Owner-only workflow",
+      instructions: "Summarize the release status.",
+      trigger: "manual",
+    };
+    const workflow = await as(editor).post(`/workspaces/${ws.id}/workflows`, workflowBody);
+    expect(workflow.status).toBe(201);
+    expect((await as(peer).patch(`/workspaces/${ws.id}/workflows/${workflow.body.id}`, workflowBody)).status).toBe(403);
+    expect((await as(peer).delete(`/workspaces/${ws.id}/workflows/${workflow.body.id}`)).status).toBe(403);
+    expect(
+      (
+        await as(editor).patch(`/workspaces/${ws.id}/workflows/${workflow.body.id}`, {
+          ...workflowBody,
+          name: "Editor-owned workflow",
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await as(admin).patch(`/workspaces/${ws.id}/workflows/${workflow.body.id}`, {
+          ...workflowBody,
+          name: "Admin-managed workflow",
+        })
+      ).status,
+    ).toBe(200);
   });
 });

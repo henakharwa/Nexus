@@ -10,11 +10,22 @@ import { createPostgresRoomBus, realtimeBusEnabled } from "./realtime-bus.js";
 import { toLlmHistory } from "./history.js";
 import { replyForResolvedActions, stripConfirmationBoilerplate, type AgentKind } from "./agent.js";
 import { resolveLlmConfig } from "./llm-client.js";
-import { buildToolsForWorkspace, wrapForProposal, registerActionRoutes, expireStaleActions, recordReads, proposalRequest } from "./actions.js";
+import {
+  buildToolsForWorkspace,
+  wrapForProposal,
+  registerActionRoutes,
+  expireStaleActions,
+  recordReads,
+  proposalRequest,
+} from "./actions.js";
 import type { ProposalContext } from "@mai-chat/shared-types";
 import { channelMentions } from "./slack-channels.js";
 import { describeRulesForAgent } from "./approval-rules.js";
-import { registerGithubTeamRoutes, registerGithubWebhookRoutes, type GithubEventHandler } from "./routes/github-team.js";
+import {
+  registerGithubTeamRoutes,
+  registerGithubWebhookRoutes,
+  type GithubEventHandler,
+} from "./routes/github-team.js";
 import { formatTeamActivity, listTeamActivity, summarizeGithubEvent } from "./github-team.js";
 import type { MessageProvenance, TeamActivity } from "@mai-chat/shared-types";
 import { parseMentions } from "./mentions.js";
@@ -39,12 +50,19 @@ import { registerConversationsRoutes } from "./routes/conversations.js";
 import { registerPreferencesRoutes } from "./routes/preferences.js";
 import { registerIntegrationsRoutes } from "./routes/integrations.js";
 import { registerApprovalRulesRoutes } from "./routes/approval-rules.js";
-import { workflowRequestsExternalChange, preferWorkspaceMemoryForRepositoryUnavailableWorkflow } from "./input-parsers.js";
+import {
+  workflowRequestsExternalChange,
+  preferWorkspaceMemoryForRepositoryUnavailableWorkflow,
+} from "./input-parsers.js";
 
 // Re-exported so existing imports (tests, actions.ts, index.ts) keep working.
 export * from "./server-deps.js";
-export { workflowRequestsExternalChange, parseWorkspaceMemoryInput, preferWorkspaceMemoryForRepositoryUnavailableWorkflow, parseWorkspaceArtifactInput } from "./input-parsers.js";
-
+export {
+  workflowRequestsExternalChange,
+  parseWorkspaceMemoryInput,
+  preferWorkspaceMemoryForRepositoryUnavailableWorkflow,
+  parseWorkspaceArtifactInput,
+} from "./input-parsers.js";
 
 // Workspace HTTP routes and WebSocket connections require a valid session.
 // The landing page stays public. OAuth login reuses the integration callback,
@@ -77,8 +95,28 @@ export function createApp(deps: CreateServerDeps = defaultDeps) {
       // request bodies or secrets. A 4xx is the client's outcome (not signed
       // in, no permission, a conflict) and is logged as a warning; only a
       // 5xx is the server's own failure and logged as an error.
-      if (res.statusCode >= 500) console.error(JSON.stringify({ level: "error", event: "http_request", requestId, method: req.method, path: req.path, status: res.statusCode }));
-      else if (res.statusCode >= 400) console.warn(JSON.stringify({ level: "warn", event: "http_request", requestId, method: req.method, path: req.path, status: res.statusCode }));
+      if (res.statusCode >= 500)
+        console.error(
+          JSON.stringify({
+            level: "error",
+            event: "http_request",
+            requestId,
+            method: req.method,
+            path: req.path,
+            status: res.statusCode,
+          }),
+        );
+      else if (res.statusCode >= 400)
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            event: "http_request",
+            requestId,
+            method: req.method,
+            path: req.path,
+            status: res.statusCode,
+          }),
+        );
     });
     next();
   });
@@ -104,9 +142,10 @@ export function createApp(deps: CreateServerDeps = defaultDeps) {
     // Production must send verification mail by default. Local development
     // stays convenient unless explicitly enabled, while production can only
     // be opted out of deliberately with EMAIL_VERIFICATION_ENABLED=false.
-    emailVerificationEnabled: process.env.NODE_ENV === "production"
-      ? process.env.EMAIL_VERIFICATION_ENABLED !== "false"
-      : process.env.EMAIL_VERIFICATION_ENABLED === "true",
+    emailVerificationEnabled:
+      process.env.NODE_ENV === "production"
+        ? process.env.EMAIL_VERIFICATION_ENABLED !== "false"
+        : process.env.EMAIL_VERIFICATION_ENABLED === "true",
   };
   registerUserAuthRoutes(app, userAuthConfig, deps.userAuthDeps, deps.mailer);
   registerEmailVerificationRoutes(app, userAuthConfig, deps.mailer);
@@ -114,7 +153,19 @@ export function createApp(deps: CreateServerDeps = defaultDeps) {
   app.use("/workspaces", requireAuth);
   // A malformed entity id can never match a row, so answer 404 up front
   // instead of letting Postgres reject the value as a 500.
-  for (const name of ["taskId", "agentId", "memoryId", "artifactId", "workflowId", "conversationId", "requestId", "userId", "versionId", "invitationId", "repositoryId"]) {
+  for (const name of [
+    "taskId",
+    "agentId",
+    "memoryId",
+    "artifactId",
+    "workflowId",
+    "conversationId",
+    "requestId",
+    "userId",
+    "versionId",
+    "invitationId",
+    "repositoryId",
+  ]) {
     app.param(name, (req: Request, res: Response, next: NextFunction, value: string) => {
       if (UUID_RE.test(value)) return next();
       res.status(404).json({ error: "not found" });
@@ -151,12 +202,16 @@ export function createApp(deps: CreateServerDeps = defaultDeps) {
     return true;
   }
 
-  async function requirePermission(req: Request, res: Response, permission: keyof import("@mai-chat/shared-types").WorkspacePermissions): Promise<boolean> {
+  async function requirePermission(
+    req: Request,
+    res: Response,
+    permission: keyof import("@mai-chat/shared-types").WorkspacePermissions,
+  ): Promise<boolean> {
     const workspaceId = await checkWorkspaceId(req, res);
     if (!workspaceId) return false;
     const role = await db.getWorkspaceRole(workspaceId, req.user!.id);
     if (!role && (await missingWorkspace(res, workspaceId))) return false;
-    if (!role || !(await db.hasWorkspacePermission(workspaceId, role, permission))) {
+    if (!role || !(await db.hasWorkspacePermissionForUser(workspaceId, role, req.user!.id, permission))) {
       res.status(403).json({ error: "Your workspace role does not have permission for this action." });
       return false;
     }
@@ -197,14 +252,20 @@ export function createApp(deps: CreateServerDeps = defaultDeps) {
  */
 export async function describeSlackChannelMentions(
   messages: Array<{ role: string; content: string }>,
-  findSlackChannels: ((names: string[]) => Promise<Record<string, string | null>>) | undefined
+  findSlackChannels: ((names: string[]) => Promise<Record<string, string | null>>) | undefined,
 ): Promise<string | null> {
   if (!findSlackChannels) return null;
   const latest = [...messages].reverse().find((message) => message.role === "user");
   const names = latest ? channelMentions(latest.content) : [];
   if (names.length === 0) return null;
   const found = await findSlackChannels(names);
-  const lines = names.filter((name) => name in found).map((name) => (found[name] ? `- #${name} = channel ID ${found[name]}` : `- #${name}: not found among the channels this member can see`));
+  const lines = names
+    .filter((name) => name in found)
+    .map((name) =>
+      found[name]
+        ? `- #${name} = channel ID ${found[name]}`
+        : `- #${name}: not found among the channels this member can see`,
+    );
   return lines.length ? lines.join("\n") : null;
 }
 
@@ -217,10 +278,23 @@ export function registerDashboardBroadcastRoutes(app: Express, rooms: RoomRegist
     const role = await db.getWorkspaceRole(workspaceId, req.user!.id);
     if (!role) return res.status(403).json({ error: "Not a member of this workspace." });
     const fromHealth = typeof req.body?.fromHealth === "string" ? req.body.fromHealth : "unknown";
-    const toHealth = typeof req.body?.toHealth === "string" ? req.body.toHealth : artifact.dashboardData?.health ?? "unknown";
+    const toHealth =
+      typeof req.body?.toHealth === "string" ? req.body.toHealth : (artifact.dashboardData?.health ?? "unknown");
     const summary = `${artifact.title} health changed: ${fromHealth.replace("_", " ")} → ${toHealth.replace("_", " ")}`;
-    await db.recordAuditEvent({ workspaceId, eventType: "artifact.updated", actorType: "system", actorName: "Dashboard health", summary });
-    rooms.broadcast(workspaceId, { type: "dashboard_health_changed", artifactId, artifactTitle: artifact.title, fromHealth, toHealth });
+    await db.recordAuditEvent({
+      workspaceId,
+      eventType: "artifact.updated",
+      actorType: "system",
+      actorName: "Dashboard health",
+      summary,
+    });
+    rooms.broadcast(workspaceId, {
+      type: "dashboard_health_changed",
+      artifactId,
+      artifactTitle: artifact.title,
+      fromHealth,
+      toHealth,
+    });
     res.status(204).end();
   });
 }
@@ -298,12 +372,26 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     // False for workflow runs marked "Requires approval": approval rules
     // can't auto-approve their writes (block and require-approvals rules
     // still apply).
-    allowAutoApprove = true
-  ): Promise<{ toolCalls: number; estimatedTokens: number; estimatedCostUsd: number; providerPromptTokens: number | null; providerCompletionTokens: number | null; providerCostUsd: number | null; outputExcerpt: string; inputExcerpt: string | null; toolTrace: Array<{ name: string; durationMs: number; status: "succeeded" | "failed" }> }> {
-    const configuredAgent = configuredAgentId ? await db.getPublishedWorkspaceAgent(workspaceId, configuredAgentId) : null;
+    allowAutoApprove = true,
+  ): Promise<{
+    toolCalls: number;
+    estimatedTokens: number;
+    estimatedCostUsd: number;
+    providerPromptTokens: number | null;
+    providerCompletionTokens: number | null;
+    providerCostUsd: number | null;
+    outputExcerpt: string;
+    inputExcerpt: string | null;
+    toolTrace: Array<{ name: string; durationMs: number; status: "succeeded" | "failed" }>;
+  }> {
+    const configuredAgent = configuredAgentId
+      ? await db.getPublishedWorkspaceAgent(workspaceId, configuredAgentId)
+      : null;
     if (configuredAgentId && !configuredAgent) throw new Error("That workspace agent has not been published yet.");
-    if (configuredAgent && configuredAgent.baseAgent !== agentKind) throw new Error("The selected agent configuration does not match this specialist.");
-    if (configuredAgent && agentKind !== "project" && !configuredAgent.approvedProviders.includes(agentKind)) throw new Error(`The ${configuredAgent.name} configuration is not approved to use ${agentKind}.`);
+    if (configuredAgent && configuredAgent.baseAgent !== agentKind)
+      throw new Error("The selected agent configuration does not match this specialist.");
+    if (configuredAgent && agentKind !== "project" && !configuredAgent.approvedProviders.includes(agentKind))
+      throw new Error(`The ${configuredAgent.name} configuration is not approved to use ${agentKind}.`);
     const messages = await db.listMessages(workspaceId, conversationId);
     // Diagnostic timing (temporary, 2026-09-21 -- tracking down reports of
     // slow replies since GitHub's MCP tools were added): this covers
@@ -317,10 +405,23 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     const built = await buildToolsForWorkspace(workspaceId, deps, requestedBy.userId ?? undefined, {
       onGithubRepoUsed: (fullName) => reposUsed.add(fullName),
     });
-    console.log(`[timing] workspace ${workspaceId}: buildToolsForWorkspace (incl. GitHub MCP container) took ${Date.now() - buildStart}ms`);
+    console.log(
+      `[timing] workspace ${workspaceId}: buildToolsForWorkspace (incl. GitHub MCP container) took ${Date.now() - buildStart}ms`,
+    );
     // Read tools run for real from the agent loop; write tools are
     // swapped for proposal-only stand-ins here -- see actions.ts.
-    const specialistTools = agentKind === "github" ? built.githubTools : agentKind === "slack" ? built.slackTools : agentKind === "linear" ? built.linearTools : agentKind === "notion" ? built.notionTools : agentKind === "figma" ? built.figmaTools : [];
+    const specialistTools =
+      agentKind === "github"
+        ? built.githubTools
+        : agentKind === "slack"
+          ? built.slackTools
+          : agentKind === "linear"
+            ? built.linearTools
+            : agentKind === "notion"
+              ? built.notionTools
+              : agentKind === "figma"
+                ? built.figmaTools
+                : [];
     // Reviews and checks are runtime read-only. Workflows that explicitly
     // request a write retain proposal tools, never direct write execution.
     const actingAccount = agentKind === "project" ? undefined : built.accounts[agentKind];
@@ -333,28 +434,43 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       source: workflowInstructions ? "workflow" : "chat",
       reads: reads.map((read) => ({ ...read })),
     });
-    const tools = recordReads(wrapForProposal(specialistTools, workspaceId, conversationId, rooms, requestedBy.userId ? { userId: requestedBy.userId, name: requestedBy.name } : undefined, agentKind, {
-      readOnly: workflowReadOnly,
-      runAs: actingAccount,
-      listOpenIssues: built.listOpenIssues,
-      allowAutoApprove,
-      githubLookups: built.githubLookups,
-      slackChannelName: built.slackChannelName,
-      proposalContext,
-    }), reads);
+    const tools = recordReads(
+      wrapForProposal(
+        specialistTools,
+        workspaceId,
+        conversationId,
+        rooms,
+        requestedBy.userId ? { userId: requestedBy.userId, name: requestedBy.name } : undefined,
+        agentKind,
+        {
+          readOnly: workflowReadOnly,
+          runAs: actingAccount,
+          listOpenIssues: built.listOpenIssues,
+          allowAutoApprove,
+          githubLookups: built.githubLookups,
+          slackChannelName: built.slackChannelName,
+          proposalContext,
+        },
+      ),
+      reads,
+    );
     // A workflow configured for a specialist is an operational contract: it
     // must have that specialist's connected tool surface. Letting the model
     // write an apologetic text-only reply makes a broken integration look
     // like a successful automation and hides the failure from diagnostics,
     // alerts, and run-health metrics.
     if (workflowInstructions && agentKind !== "project" && tools.length === 0) {
-      throw new Error(`${agentKind[0].toUpperCase()}${agentKind.slice(1)} is not connected or has no approved tools for this workflow.`);
+      throw new Error(
+        `${agentKind[0].toUpperCase()}${agentKind.slice(1)} is not connected or has no approved tools for this workflow.`,
+      );
     }
     // Cheap, always-on diagnostic -- when someone reports "the agent says
     // it can't see GitHub" the first thing to know is whether the tool
     // list was actually empty for this turn (an integration/credential
     // problem) or non-empty (the model just didn't use what it had).
-    console.log(`[agent] workspace ${workspaceId}: ${tools.length} tool(s) available for this turn${workflowInstructions ? ` (workflow ${workflowReadOnly ? "read-only" : "approved-write proposal"})` : ""}`);
+    console.log(
+      `[agent] workspace ${workspaceId}: ${tools.length} tool(s) available for this turn${workflowInstructions ? ` (workflow ${workflowReadOnly ? "read-only" : "approved-write proposal"})` : ""}`,
+    );
 
     // Confirmation notices are deliberately excluded from normal LLM
     // history (history.ts), so provide the recent authoritative outcomes as
@@ -369,29 +485,41 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     // "#bugs" in a Slack request: look the channel up in the member's
     // channel list now, so the agent uses the exact channel instead of
     // searching for it (and never substitutes another one).
-    const slackChannels = agentKind === "slack" ? await describeSlackChannelMentions(messages, built.findSlackChannels) : null;
+    const slackChannels =
+      agentKind === "slack" ? await describeSlackChannelMentions(messages, built.findSlackChannels) : null;
     // The rules that can apply to this agent's writes, so it doesn't propose
     // what a rule will block. Read-only turns can't write, so they skip it.
-    const approvalRules = agentKind !== "project" && !workflowReadOnly ? describeRulesForAgent(await db.listApprovalRules(workspaceId), agentKind) : null;
+    const approvalRules =
+      agentKind !== "project" && !workflowReadOnly
+        ? describeRulesForAgent(await db.listApprovalRules(workspaceId), agentKind)
+        : null;
     // What teammates and GitHub did recently, so the GitHub agent can point
     // out work that is already done or under way.
-    const teamActivity = agentKind === "github" ? formatTeamActivity(await listTeamActivity(workspaceId, { hours: 24, limit: 8 }).catch(() => [])) : null;
+    const teamActivity =
+      agentKind === "github"
+        ? formatTeamActivity(await listTeamActivity(workspaceId, { hours: 24, limit: 8 }).catch(() => []))
+        : null;
     const turnStart = Date.now();
     const allowedModels = (process.env.AGENT_LLM_ALLOWED_MODELS ?? "").split(",").map((model) => model.trim());
-    const selectedModel = configuredAgent?.model && configuredAgent.model !== "workspace-default" && allowedModels.includes(configuredAgent.model) ? configuredAgent.model : undefined;
+    const selectedModel =
+      configuredAgent?.model &&
+      configuredAgent.model !== "workspace-default" &&
+      allowedModels.includes(configuredAgent.model)
+        ? configuredAgent.model
+        : undefined;
     // Workflow start records are system messages for people to read, and
     // history.ts deliberately excludes system rows from LLM history. Pass
     // the workflow instructions explicitly so an automated turn always has
     // a concrete task, while retaining the configured agent's own rules.
     const workflowGuidance = workflowInstructions
-      ? `WORKFLOW INSTRUCTIONS — complete this task for the team:\n${workflowInstructions}\n\nFor this automated run, prefer collection-level read calls. Do not fetch every issue, pull request, or workflow run individually unless the list results require it. Once you have the requested categories, provide the concise report.${workspaceMemory ? " Workspace memory is available for this run. Use it for any policy-based draft and cite the relevant [Memory: title] label. A missing repository only prevents live data; it must never prevent a draft based on saved workspace memory." : " No workspace memory is available for this run. If the task requires a saved policy, say that the policy has not been saved in this workspace."}${workflowReadOnly ? " This is a read-only workflow: do not propose external changes." : " This workflow explicitly requests a governed change: create only a pending approval proposal, never a direct external change. When creating a GitHub issue, use issue_write with method=\"create\"."}`
+      ? `WORKFLOW INSTRUCTIONS — complete this task for the team:\n${workflowInstructions}\n\nFor this automated run, prefer collection-level read calls. Do not fetch every issue, pull request, or workflow run individually unless the list results require it. Once you have the requested categories, provide the concise report.${workspaceMemory ? " Workspace memory is available for this run. Use it for any policy-based draft and cite the relevant [Memory: title] label. A missing repository only prevents live data; it must never prevent a draft based on saved workspace memory." : " No workspace memory is available for this run. If the task requires a saved policy, say that the policy has not been saved in this workspace."}${workflowReadOnly ? " This is a read-only workflow: do not propose external changes." : ' This workflow explicitly requests a governed change: create only a pending approval proposal, never a direct external change. When creating a GitHub issue, use issue_write with method="create".'}`
       : "";
     const activeInstructions = [configuredAgent?.instructions, workflowGuidance].filter(Boolean).join("\n\n");
     const result = await deps.runAgentTurn({
       history: toLlmHistory(messages),
       tools,
       githubContext: agentKind === "github" ? built.githubContext : null,
-      githubNotice: agentKind === "github" ? built.githubNotice ?? null : null,
+      githubNotice: agentKind === "github" ? (built.githubNotice ?? null) : null,
       teamActivity,
       actionContext: recentActions || null,
       slackChannels,
@@ -407,13 +535,15 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       // larger but still finite tool-call loop than interactive chat.
       maxTurns: workflowInstructions ? 10 : undefined,
     });
-    console.log(`[timing] workspace ${workspaceId}: runAgentTurn (all LLM calls + tool calls, see [timing] lines above) took ${Date.now() - turnStart}ms`);
+    console.log(
+      `[timing] workspace ${workspaceId}: runAgentTurn (all LLM calls + tool calls, see [timing] lines above) took ${Date.now() - turnStart}ms`,
+    );
     const proposedActions = await Promise.all(
-      (result.proposedActionIds ?? []).map((actionId) => db.getPendingAction(workspaceId, actionId))
+      (result.proposedActionIds ?? []).map((actionId) => db.getPendingAction(workspaceId, actionId)),
     );
     const resolvedReply = replyForResolvedActions(
       proposedActions.filter((action): action is NonNullable<typeof action> => action !== null),
-      agentKind
+      agentKind,
     );
     // Which account (and repositories) answered, shown under the reply.
     const provenance: MessageProvenance | null =
@@ -425,7 +555,13 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
             actedAsName: requestedBy.name,
             account: actingAccount.account,
             ...(agentKind === "github"
-              ? { repos: reposUsed.size ? [...reposUsed] : built.githubContext ? [`${built.githubContext.owner}/${built.githubContext.repo}`] : [] }
+              ? {
+                  repos: reposUsed.size
+                    ? [...reposUsed]
+                    : built.githubContext
+                      ? [`${built.githubContext.owner}/${built.githubContext.repo}`]
+                      : [],
+                }
               : {}),
           }
         : null;
@@ -434,7 +570,19 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       conversationId,
       provenance,
       role: "agent",
-      authorName: configuredAgent?.name ?? (agentKind === "github" ? "GitHub Agent" : agentKind === "slack" ? "Slack Agent" : agentKind === "linear" ? "Linear Agent" : agentKind === "notion" ? "Notion Agent" : agentKind === "figma" ? "Figma Agent" : "Project Agent"),
+      authorName:
+        configuredAgent?.name ??
+        (agentKind === "github"
+          ? "GitHub Agent"
+          : agentKind === "slack"
+            ? "Slack Agent"
+            : agentKind === "linear"
+              ? "Linear Agent"
+              : agentKind === "notion"
+                ? "Notion Agent"
+                : agentKind === "figma"
+                  ? "Figma Agent"
+                  : "Project Agent"),
       // When the card was confirmed or cancelled before this turn finished,
       // the confirm/cancel path has already posted the outcome. Keep the
       // agent's own explanation (for example, what it could not do) without
@@ -442,7 +590,11 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       // generic outcome line only when nothing else is left.
       content: resolvedReply
         ? stripConfirmationBoilerplate(result.reply).trim() || resolvedReply
-        : preferWorkspaceMemoryForRepositoryUnavailableWorkflow(result.reply, workspaceMemory, Boolean(workflowInstructions)),
+        : preferWorkspaceMemoryForRepositoryUnavailableWorkflow(
+            result.reply,
+            workspaceMemory,
+            Boolean(workflowInstructions),
+          ),
     });
     rooms.broadcast(`${workspaceId}:${conversationId}`, { type: "message", message: agentMessage });
     rooms.broadcast(workspaceId, { type: "workspace_message", message: agentMessage });
@@ -451,44 +603,90 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       conversationId,
       kind: "agent_completed",
       text: "Agent completed a response in the workspace.",
-      excludeUserIds: rooms.participants(`${workspaceId}:${conversationId}`).flatMap((participant) => participant.userId ? [participant.userId] : []),
+      excludeUserIds: rooms
+        .participants(`${workspaceId}:${conversationId}`)
+        .flatMap((participant) => (participant.userId ? [participant.userId] : [])),
     });
     const output = agentMessage.content;
     const providerTokens = result.providerPromptTokens + result.providerCompletionTokens;
     const estimatedTokens = providerTokens || Math.ceil(((workflowInstructions?.length ?? 0) + output.length) / 4);
-    return { toolCalls: result.toolCallsMade, estimatedTokens, estimatedCostUsd: Number((estimatedTokens * 0.00000059).toFixed(6)), providerPromptTokens: providerTokens ? result.providerPromptTokens : null, providerCompletionTokens: providerTokens ? result.providerCompletionTokens : null, providerCostUsd: result.providerCostUsd, outputExcerpt: output.slice(0, 1000), inputExcerpt: workflowInstructions ? workflowInstructions.slice(0, 1000) : null, toolTrace: result.toolTrace };
+    return {
+      toolCalls: result.toolCallsMade,
+      estimatedTokens,
+      estimatedCostUsd: Number((estimatedTokens * 0.00000059).toFixed(6)),
+      providerPromptTokens: providerTokens ? result.providerPromptTokens : null,
+      providerCompletionTokens: providerTokens ? result.providerCompletionTokens : null,
+      providerCostUsd: result.providerCostUsd,
+      outputExcerpt: output.slice(0, 1000),
+      inputExcerpt: workflowInstructions ? workflowInstructions.slice(0, 1000) : null,
+      toolTrace: result.toolTrace,
+    };
   }
 
   // The HTTP routes created by createApp enqueue a workflow through this
   // runner. Keeping the actual agent invocation here means scheduled and
   // event-driven work takes the identical tool, provider-permission, action
   // proposal, notification, and WebSocket paths as an ordinary chat turn.
-  const runWorkflow = async (workflow: NonNullable<Awaited<ReturnType<typeof db.getWorkspaceWorkflow>>>, trigger: "manual" | "schedule" | "github_issue" | "github_status" | "slack_mention", user: { id: string | null; displayName: string }, eventText?: string) => {
+  const runWorkflow = async (
+    workflow: NonNullable<Awaited<ReturnType<typeof db.getWorkspaceWorkflow>>>,
+    trigger: "manual" | "schedule" | "github_issue" | "github_status" | "slack_mention",
+    user: { id: string | null; displayName: string },
+    eventText?: string,
+  ) => {
     // A workflow runs as its owner, through the owner's own connections. If
     // the owner has left the workspace, the run fails until someone takes
     // the workflow over.
     const role = user.id ? await db.getWorkspaceRole(workflow.workspaceId, user.id) : null;
     const actor = role ? user : { id: null, displayName: "Workflow automation" };
     const run = await db.createWorkflowRun(workflow, trigger);
-    await db.recordAuditEvent({ workspaceId: workflow.workspaceId, eventType: "workflow.started", actorType: role ? "user" : "system", actorUserId: role ? user.id : null, actorName: actor.displayName, summary: `${actor.displayName} started workflow ${workflow.name}`, metadata: { workflowId: workflow.id, runId: run.id, trigger } });
+    await db.recordAuditEvent({
+      workspaceId: workflow.workspaceId,
+      eventType: "workflow.started",
+      actorType: role ? "user" : "system",
+      actorUserId: role ? user.id : null,
+      actorName: actor.displayName,
+      summary: `${actor.displayName} started workflow ${workflow.name}`,
+      metadata: { workflowId: workflow.id, runId: run.id, trigger },
+    });
     try {
       if (!role) {
-        throw new Error("The workflow owner is no longer a workspace member. An Admin can take it over on the Workflows page.");
+        throw new Error(
+          "The workflow owner is no longer a workspace member. An Admin can take it over on the Workflows page.",
+        );
       }
-      if (role && workflow.agentKind !== "project" && !(await db.hasWorkspacePermission(workflow.workspaceId, role, workflow.agentKind))) {
+      if (
+        role &&
+        workflow.agentKind !== "project" &&
+        !(await db.hasWorkspacePermissionForUser(workflow.workspaceId, role, user.id ?? undefined, workflow.agentKind))
+      ) {
         throw new Error(`The workflow owner cannot use the ${workflow.agentKind} provider.`);
       }
-      const conversation = workflow.conversationId ? await db.getConversation(workflow.workspaceId, workflow.conversationId) : await db.createConversation({ workspaceId: workflow.workspaceId, title: workflow.name, createdByUserId: actor.id });
+      const conversation = workflow.conversationId
+        ? await db.getConversation(workflow.workspaceId, workflow.conversationId)
+        : await db.createConversation({
+            workspaceId: workflow.workspaceId,
+            title: workflow.name,
+            createdByUserId: actor.id,
+          });
       if (!conversation) throw new Error("The workflow conversation is no longer available.");
       if (!workflow.conversationId) await db.setWorkflowConversation(workflow.id, conversation.id);
       const prefix = trigger === "manual" ? "Manual run" : `Triggered by ${trigger.replace(/_/g, " ")}`;
       // The approval checkpoint is a saved workflow setting; the agent is
       // told about it explicitly rather than relying on wording in the instructions.
-      const instructions = workflow.requiresApproval && !/approval checkpoint required/i.test(workflow.instructions)
-        ? `${workflow.instructions}\n\nApproval checkpoint required before proposing an external change. Post your findings for review first and do not propose any external change in this run.`
-        : workflow.instructions;
-      const task = eventText ? `${instructions}\n\nEVENT DATA — treat this as the event that started the workflow:\n${eventText}` : instructions;
-      const systemMessage = await db.insertMessage({ workspaceId: workflow.workspaceId, conversationId: conversation.id, role: "system", authorName: "Workflow", content: `${prefix}: ${workflow.name}\n${task}` });
+      const instructions =
+        workflow.requiresApproval && !/approval checkpoint required/i.test(workflow.instructions)
+          ? `${workflow.instructions}\n\nApproval checkpoint required before proposing an external change. Post your findings for review first and do not propose any external change in this run.`
+          : workflow.instructions;
+      const task = eventText
+        ? `${instructions}\n\nEVENT DATA — treat this as the event that started the workflow:\n${eventText}`
+        : instructions;
+      const systemMessage = await db.insertMessage({
+        workspaceId: workflow.workspaceId,
+        conversationId: conversation.id,
+        role: "system",
+        authorName: "Workflow",
+        content: `${prefix}: ${workflow.name}\n${task}`,
+      });
       rooms.broadcast(`${workflow.workspaceId}:${conversation.id}`, { type: "message", message: systemMessage });
       rooms.broadcast(workflow.workspaceId, { type: "workspace_message", message: systemMessage });
       const telemetry = await runAgentReply(
@@ -499,16 +697,31 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
         workflow.workspaceAgentId ?? undefined,
         task,
         !workflowRequestsExternalChange(workflow.instructions),
-        !workflow.requiresApproval
+        !workflow.requiresApproval,
       );
       await db.finishWorkflowRun(workflow.id, run.id, "succeeded", "Agent response completed.", telemetry);
-      await db.recordAuditEvent({ workspaceId: workflow.workspaceId, eventType: "workflow.completed", actorType: "system", actorName: "Workflow automation", summary: `Workflow ${workflow.name} completed`, metadata: { workflowId: workflow.id, runId: run.id, trigger } });
+      await db.recordAuditEvent({
+        workspaceId: workflow.workspaceId,
+        eventType: "workflow.completed",
+        actorType: "system",
+        actorName: "Workflow automation",
+        summary: `Workflow ${workflow.name} completed`,
+        metadata: { workflowId: workflow.id, runId: run.id, trigger },
+      });
     } catch (error) {
       const detail = errMessage(error);
       await db.finishWorkflowRun(workflow.id, run.id, "failed", detail);
-      await db.recordAuditEvent({ workspaceId: workflow.workspaceId, eventType: "workflow.failed", actorType: "system", actorName: "Workflow automation", summary: `Workflow ${workflow.name} failed: ${detail}`, metadata: { workflowId: workflow.id, runId: run.id, trigger } });
+      await db.recordAuditEvent({
+        workspaceId: workflow.workspaceId,
+        eventType: "workflow.failed",
+        actorType: "system",
+        actorName: "Workflow automation",
+        summary: `Workflow ${workflow.name} failed: ${detail}`,
+        metadata: { workflowId: workflow.id, runId: run.id, trigger },
+      });
       // Admin-set per-workspace threshold; falls back to the server default.
-      const failureAlertThreshold = (await db.getObservabilityRetentionPolicy(workflow.workspaceId)).failureAlertThreshold;
+      const failureAlertThreshold = (await db.getObservabilityRetentionPolicy(workflow.workspaceId))
+        .failureAlertThreshold;
       // Count this workflow's own failures so the alert names the workflow
       // that is actually failing repeatedly.
       const recentFailures = await db.countRecentFailedWorkflowRuns(workflow.workspaceId, 24, workflow.id);
@@ -534,7 +747,12 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
   app.locals.runWorkflow = (...args: Parameters<typeof runWorkflow>): Promise<void> =>
     runWorkflow(...args).catch((error) => {
       console.error(`workflow run failed to start or finish: ${args[0].name} (${args[0].id})`, error);
-      captureError(error, { where: "workflow-run", workspaceId: args[0].workspaceId, workflowId: args[0].id, trigger: args[1] });
+      captureError(error, {
+        where: "workflow-run",
+        workspaceId: args[0].workspaceId,
+        workflowId: args[0].id,
+        trigger: args[1],
+      });
     });
 
   // A verified GitHub webhook delivery for one workspace: recorded in
@@ -551,12 +769,25 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       summary: summary.summary,
       metadata: { event, repo: summary.repo, url: summary.url, activity: summary.summary, deliveryId },
     });
-    const activity: TeamActivity = { id: recorded.id, source: "github", actorName: recorded.actorName, summary: summary.summary, repo: summary.repo, url: summary.url, createdAt: recorded.createdAt };
+    const activity: TeamActivity = {
+      id: recorded.id,
+      source: "github",
+      actorName: recorded.actorName,
+      summary: summary.summary,
+      repo: summary.repo,
+      url: summary.url,
+      createdAt: recorded.createdAt,
+    };
     rooms.broadcast(workspaceId, { type: "team_activity", activity });
     if (!summary.trigger) return;
     for (const workflow of await db.listEventWorkflows(workspaceId, summary.trigger)) {
       const owner = workflow.ownerUserId ? await db.getUserById(workflow.ownerUserId) : null;
-      void app.locals.runWorkflow(workflow, summary.trigger, { id: owner?.id ?? null, displayName: owner?.displayName ?? "Workflow automation" }, summary.eventText);
+      void app.locals.runWorkflow(
+        workflow,
+        summary.trigger,
+        { id: owner?.id ?? null, displayName: owner?.displayName ?? "Workflow automation" },
+        summary.eventText,
+      );
     }
   };
   app.locals.handleGithubEvent = handleGithubEvent;
@@ -573,7 +804,10 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
         for (const workflow of due) {
           const owner = workflow.ownerUserId ? await db.getUserById(workflow.ownerUserId) : null;
           // runWorkflow records a failed run when the owner has left the workspace.
-          void app.locals.runWorkflow(workflow, "schedule", { id: owner?.id ?? null, displayName: owner?.displayName ?? "Workflow automation" });
+          void app.locals.runWorkflow(workflow, "schedule", {
+            id: owner?.id ?? null,
+            displayName: owner?.displayName ?? "Workflow automation",
+          });
         }
       })().catch((error) => {
         console.error("workflow scheduler failed", error);
@@ -584,26 +818,58 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
   let retentionScheduler: NodeJS.Timeout | undefined;
   let notificationScheduler: NodeJS.Timeout | undefined;
   let sessionCleanupScheduler: NodeJS.Timeout | undefined;
-  const enforceRetention = () => void db.runWithAdvisoryLock("workflow-run-retention", () => db.enforceWorkflowRunRetention()).catch((error) => {
-    console.error("workflow retention failed", error);
-    captureError(error, { where: "workflow-retention" });
+  const enforceRetention = () =>
+    void db
+      .runWithAdvisoryLock("workflow-run-retention", () => db.enforceWorkflowRunRetention())
+      .catch((error) => {
+        console.error("workflow retention failed", error);
+        captureError(error, { where: "workflow-retention" });
+      });
+  const deliverNotificationJobs = () =>
+    void db
+      .runWithAdvisoryLock("notification-delivery", async () => {
+        // Approvals expire after ACTION_APPROVAL_TTL_HOURS (24 by default).
+        await Promise.all([
+          db.escalateUnreadDecisionNotifications(),
+          db.createDailyNotificationDigests(),
+          expireStaleActions(rooms),
+        ]);
+      })
+      .catch((error) => {
+        console.error("notification scheduler failed", error);
+        captureError(error, { where: "notification-scheduler" });
+      });
+  const pruneSessions = () =>
+    void db.pruneExpiredSessions().catch((error) => {
+      console.error("session cleanup failed", error);
+      captureError(error, { where: "session-cleanup" });
+    });
+  server.on("listening", () => {
+    startWorkflowScheduler();
+    enforceRetention();
+    deliverNotificationJobs();
+    pruneSessions();
+    retentionScheduler = setInterval(enforceRetention, 24 * 60 * 60 * 1000);
+    notificationScheduler = setInterval(deliverNotificationJobs, 5 * 60 * 1000);
+    sessionCleanupScheduler = setInterval(pruneSessions, 24 * 60 * 60 * 1000);
   });
-  const deliverNotificationJobs = () => void db.runWithAdvisoryLock("notification-delivery", async () => {
-    // Approvals expire after ACTION_APPROVAL_TTL_HOURS (24 by default).
-    await Promise.all([db.escalateUnreadDecisionNotifications(), db.createDailyNotificationDigests(), expireStaleActions(rooms)]);
-  }).catch((error) => {
-    console.error("notification scheduler failed", error);
-    captureError(error, { where: "notification-scheduler" });
+  server.on("close", () => {
+    void roomBus?.close();
+    if (workflowScheduler) clearInterval(workflowScheduler);
+    if (retentionScheduler) clearInterval(retentionScheduler);
+    if (notificationScheduler) clearInterval(notificationScheduler);
+    if (sessionCleanupScheduler) clearInterval(sessionCleanupScheduler);
+    workflowScheduler = undefined;
+    retentionScheduler = undefined;
+    notificationScheduler = undefined;
+    sessionCleanupScheduler = undefined;
   });
-  const pruneSessions = () => void db.pruneExpiredSessions().catch((error) => {
-    console.error("session cleanup failed", error);
-    captureError(error, { where: "session-cleanup" });
-  });
-  server.on("listening", () => { startWorkflowScheduler(); enforceRetention(); deliverNotificationJobs(); pruneSessions(); retentionScheduler = setInterval(enforceRetention, 24 * 60 * 60 * 1000); notificationScheduler = setInterval(deliverNotificationJobs, 5 * 60 * 1000); sessionCleanupScheduler = setInterval(pruneSessions, 24 * 60 * 60 * 1000); });
-  server.on("close", () => { void roomBus?.close(); if (workflowScheduler) clearInterval(workflowScheduler); if (retentionScheduler) clearInterval(retentionScheduler); if (notificationScheduler) clearInterval(notificationScheduler); if (sessionCleanupScheduler) clearInterval(sessionCleanupScheduler); workflowScheduler = undefined; retentionScheduler = undefined; notificationScheduler = undefined; sessionCleanupScheduler = undefined; });
 
   wss.on("connection", (ws: WebSocket, req) => {
-    if (req.headers.origin && req.headers.origin !== (process.env.WEB_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "")) {
+    if (
+      req.headers.origin &&
+      req.headers.origin !== (process.env.WEB_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "")
+    ) {
       ws.close(4003, "Untrusted origin");
       return;
     }
@@ -674,7 +940,13 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
         ws.close(4003, "Join this workspace with its code or an invitation first");
         return;
       }
-      const participant: Participant = { clientId: randomUUID(), userId: user.id, displayName, connectedAt: new Date().toISOString(), activeConversationId: conversationId };
+      const participant: Participant = {
+        clientId: randomUUID(),
+        userId: user.id,
+        displayName,
+        connectedAt: new Date().toISOString(),
+        activeConversationId: conversationId,
+      };
       rooms.join(workspaceId, ws, participant);
       rooms.join(roomId, ws, participant);
 
@@ -702,20 +974,40 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
           }
           const content = parsed.content.trim();
           if (content.length > MAX_CHAT_MESSAGE_CHARS) {
-            ws.send(JSON.stringify({ type: "error", error: `Messages can be at most ${MAX_CHAT_MESSAGE_CHARS.toLocaleString("en-US")} characters. Share longer text as an artifact or a file in a connected tool.` }));
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                error: `Messages can be at most ${MAX_CHAT_MESSAGE_CHARS.toLocaleString("en-US")} characters. Share longer text as an artifact or a file in a connected tool.`,
+              }),
+            );
             return;
           }
-          const agentKind: AgentKind = parsed.agentKind === "github" || parsed.agentKind === "slack" || parsed.agentKind === "linear" || parsed.agentKind === "notion" || parsed.agentKind === "figma" || parsed.agentKind === "project"
-            ? parsed.agentKind
-            : /@github\b/i.test(content) ? "github" : /@slack\b/i.test(content) ? "slack" : "project";
+          const agentKind: AgentKind =
+            parsed.agentKind === "github" ||
+            parsed.agentKind === "slack" ||
+            parsed.agentKind === "linear" ||
+            parsed.agentKind === "notion" ||
+            parsed.agentKind === "figma" ||
+            parsed.agentKind === "project"
+              ? parsed.agentKind
+              : /@github\b/i.test(content)
+                ? "github"
+                : /@slack\b/i.test(content)
+                  ? "slack"
+                  : "project";
           // Re-read the role each message so a role change applies immediately.
           const workspaceRole = await db.getWorkspaceRole(workspaceId, user.id);
           if (!workspaceRole) {
             ws.send(JSON.stringify({ type: "error", error: "You are no longer a member of this workspace." }));
             return;
           }
-          if (agentKind !== "project" && !(await db.hasWorkspacePermission(workspaceId, workspaceRole, agentKind))) {
-            ws.send(JSON.stringify({ type: "error", error: `Your workspace role cannot use the ${agentKind} provider.` }));
+          if (
+            agentKind !== "project" &&
+            !(await db.hasWorkspacePermissionForUser(workspaceId, workspaceRole, user.id, agentKind))
+          ) {
+            ws.send(
+              JSON.stringify({ type: "error", error: `Your workspace role cannot use the ${agentKind} provider.` }),
+            );
             return;
           }
 
@@ -729,7 +1021,7 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
           const members = await db.listWorkspaceMembers(workspaceId);
           const mentions = parseMentions(
             content,
-            members.map((m) => ({ userId: m.id, displayName: m.displayName }))
+            members.map((m) => ({ userId: m.id, displayName: m.displayName })),
           );
 
           // Only one agent turn runs at a time per workspace -- everyone
@@ -745,39 +1037,53 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
           // to hand a task to a teammate just because the agent happens to
           // be busy on something else.
           if (mentions.mentionsAgent && !(await rooms.tryAcquireAgentTurn(roomId))) {
-            ws.send(JSON.stringify({ type: "error", error: "The agent is still working on the previous request. Please wait for it to finish." }));
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                error: "The agent is still working on the previous request. Please wait for it to finish.",
+              }),
+            );
             return;
           }
           // Counted only once the turn is actually starting, so a "still
           // busy" rejection above never uses up someone's allowance.
           if (mentions.mentionsAgent) {
-            const allowed = await db.consumeRateLimit("agent-turn-user", user.id, agentTurnsPerUserPerHour(), 60 * 60)
+            const allowed = await db
+              .consumeRateLimit("agent-turn-user", user.id, agentTurnsPerUserPerHour(), 60 * 60)
               .catch(async (error) => {
                 await rooms.releaseAgentTurn(roomId).catch(() => undefined);
                 throw error;
               });
             if (!allowed) {
               await rooms.releaseAgentTurn(roomId);
-              ws.send(JSON.stringify({ type: "error", error: "You've reached the hourly limit for agent requests. Please try again later, or hand this off to a teammate with an @mention." }));
+              ws.send(
+                JSON.stringify({
+                  type: "error",
+                  error:
+                    "You've reached the hourly limit for agent requests. Please try again later, or hand this off to a teammate with an @mention.",
+                }),
+              );
               return;
             }
           }
 
           // If saving the message fails, give the agent-turn lock back so the
           // conversation is not left looking busy.
-          const userMessage = await db.insertMessage({
-            workspaceId,
-            conversationId,
-            role: "user",
-            authorName: displayName,
-            userId: user.id,
-            content,
-            mentionsAgent: mentions.mentionsAgent,
-            mentionedUserIds: mentions.mentionedUserIds,
-          }).catch(async (error) => {
-            if (mentions.mentionsAgent) await rooms.releaseAgentTurn(roomId).catch(() => undefined);
-            throw error;
-          });
+          const userMessage = await db
+            .insertMessage({
+              workspaceId,
+              conversationId,
+              role: "user",
+              authorName: displayName,
+              userId: user.id,
+              content,
+              mentionsAgent: mentions.mentionsAgent,
+              mentionedUserIds: mentions.mentionedUserIds,
+            })
+            .catch(async (error) => {
+              if (mentions.mentionsAgent) await rooms.releaseAgentTurn(roomId).catch(() => undefined);
+              throw error;
+            });
           rooms.broadcast(roomId, { type: "message", message: userMessage });
           rooms.broadcast(workspaceId, { type: "workspace_message", message: userMessage });
 
@@ -785,7 +1091,9 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
             // Handed off, not addressed to the agent -- log it to the
             // audit trail (docs/spec.md: "so who's driving this stays
             // visible") and stop here; no agent turn to run.
-            const handoffNames = members.filter((m) => mentions.mentionedUserIds.includes(m.id)).map((m) => m.displayName);
+            const handoffNames = members
+              .filter((m) => mentions.mentionedUserIds.includes(m.id))
+              .map((m) => m.displayName);
             await db.recordAuditEvent({
               workspaceId,
               eventType: "handoff.directed",
@@ -807,7 +1115,13 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
           // via the finally below.
           (async () => {
             try {
-              await runAgentReply(workspaceId, conversationId, { userId: user.id, name: displayName }, agentKind, typeof parsed.agentId === "string" && UUID_RE.test(parsed.agentId) ? parsed.agentId : undefined);
+              await runAgentReply(
+                workspaceId,
+                conversationId,
+                { userId: user.id, name: displayName },
+                agentKind,
+                typeof parsed.agentId === "string" && UUID_RE.test(parsed.agentId) ? parsed.agentId : undefined,
+              );
             } catch (err) {
               console.error("agent turn failed", err);
               captureError(err, { where: "agent-turn", workspaceId, conversationId, agentKind });
@@ -821,7 +1135,9 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
               rooms.broadcast(roomId, { type: "message", message: errorMessage });
               rooms.broadcast(workspaceId, { type: "workspace_message", message: errorMessage });
             } finally {
-              await rooms.releaseAgentTurn(roomId).catch((error) => console.error("agent turn lock release failed", error));
+              await rooms
+                .releaseAgentTurn(roomId)
+                .catch((error) => console.error("agent turn lock release failed", error));
               rooms.broadcast(roomId, { type: "agent_status", status: "idle" });
             }
           })().catch((error) => {
@@ -854,7 +1170,8 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       // one socket, not crash the server for everyone.
       console.error("chat connection setup failed", error);
       captureError(error, { where: "chat-connection" });
-      if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) ws.close(1011, "Server error, please reconnect");
+      if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING)
+        ws.close(1011, "Server error, please reconnect");
     });
   });
 
@@ -862,13 +1179,36 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     const requestId = res.getHeader("x-request-id");
     // Body-parser failures (malformed JSON, oversized or unsupported bodies)
     // are the client's mistake: answer with their 4xx status, not a 500.
-    const clientStatus = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 0;
+    const clientStatus =
+      typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 0;
     if (clientStatus >= 400 && clientStatus < 500) {
-      if (!res.headersSent) res.status(clientStatus).json({ error: clientStatus === 413 ? "Request body is too large." : "The request body could not be read. Send valid JSON." });
+      if (!res.headersSent)
+        res
+          .status(clientStatus)
+          .json({
+            error:
+              clientStatus === 413
+                ? "Request body is too large."
+                : "The request body could not be read. Send valid JSON.",
+          });
       return;
     }
-    console.error(JSON.stringify({ level: "error", event: "unhandled_http_error", requestId, method: req.method, path: req.path, error: errMessage(error) }));
-    captureError(error, { where: "http", method: req.method, route: req.route?.path ?? req.path, requestId: typeof requestId === "string" ? requestId : null });
+    console.error(
+      JSON.stringify({
+        level: "error",
+        event: "unhandled_http_error",
+        requestId,
+        method: req.method,
+        path: req.path,
+        error: errMessage(error),
+      }),
+    );
+    captureError(error, {
+      where: "http",
+      method: req.method,
+      route: req.route?.path ?? req.path,
+      requestId: typeof requestId === "string" ? requestId : null,
+    });
     if (!res.headersSent) res.status(500).json({ error: "Unexpected server error", requestId });
   });
 

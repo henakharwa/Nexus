@@ -275,18 +275,47 @@ export function registerWorkspacesRoutes({ app, deps, webAppUrl, requireRole }: 
     res.json(await db.getWorkspacePermissionPolicy(paramString(req.params.id)));
   });
 
-  // The signed-in member's effective access, as described by the Nexus role
-  // access matrix: Admins hold every permission; Editors hold the saved
-  // Editor policy. The web app uses this to show enabled, disabled, or
-  // request-access states without duplicating policy logic.
+  // The signed-in member's effective access combines the Editor baseline
+  // policy with their own additional grants. An approval for one Editor is
+  // intentionally never a silent grant for every Editor.
   app.get("/workspaces/:id/access", async (req: Request, res: Response) => {
     if (!(await requireRole(req, res, ["admin", "editor"]))) return;
     const workspaceId = paramString(req.params.id);
     const role = (await db.getWorkspaceRole(workspaceId, req.user!.id))!;
+    res.json({ role, permissions: await db.getEffectiveWorkspacePermissions(workspaceId, role, req.user!.id) });
+  });
+
+  app.get("/workspaces/:id/members/:userId/permission-grants", async (req: Request, res: Response) => {
+    if (!(await requireRole(req, res, ["admin"]))) return;
+    const workspaceId = paramString(req.params.id);
+    const userId = paramString(req.params.userId);
+    if (!UUID_RE.test(userId)) return res.status(400).json({ error: "invalid user id" });
+    if (!(await db.getWorkspaceRole(workspaceId, userId))) return res.status(404).json({ error: "member not found" });
+    res.json({ permissions: await db.listWorkspaceMemberPermissionGrants(workspaceId, userId) });
+  });
+
+  app.put("/workspaces/:id/members/:userId/permission-grants/:permission", async (req: Request, res: Response) => {
+    if (!(await requireRole(req, res, ["admin"]))) return;
+    const workspaceId = paramString(req.params.id);
+    const userId = paramString(req.params.userId);
+    const permission = paramString(
+      req.params.permission,
+    ) as keyof import("@mai-chat/shared-types").WorkspacePermissions;
+    if (!UUID_RE.test(userId)) return res.status(400).json({ error: "invalid user id" });
     const policy = await db.getWorkspacePermissionPolicy(workspaceId);
-    const permissions =
-      role === "admin" ? Object.fromEntries(Object.keys(policy.admin).map((key) => [key, true])) : policy.editor;
-    res.json({ role, permissions });
+    if (!Object.keys(policy.editor).includes(permission) || typeof req.body?.granted !== "boolean")
+      return res.status(400).json({ error: "A valid permission and granted boolean are required." });
+    if (!(await db.getWorkspaceRole(workspaceId, userId))) return res.status(404).json({ error: "member not found" });
+    await db.setWorkspaceMemberPermissionGrant(workspaceId, userId, permission, req.body.granted);
+    await db.recordAuditEvent({
+      workspaceId,
+      eventType: "workspace.permissions_updated",
+      actorType: "user",
+      actorUserId: req.user!.id,
+      actorName: req.user!.displayName,
+      summary: `${req.user!.displayName} ${req.body.granted ? "granted" : "revoked"} ${permission} for a workspace member`,
+    });
+    res.status(204).end();
   });
 
   app.put("/workspaces/:id/permissions", async (req: Request, res: Response) => {
@@ -313,20 +342,19 @@ export function registerWorkspacesRoutes({ app, deps, webAppUrl, requireRole }: 
     if (!(await requireRole(req, res, ["editor"]))) return;
     const permission = req.body?.permission;
     const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
-    const policy = await db.getWorkspacePermissionPolicy(paramString(req.params.id));
+    const workspaceId = paramString(req.params.id);
+    const policy = await db.getWorkspacePermissionPolicy(workspaceId);
     if (!Object.keys(policy.editor).includes(permission)) return res.status(400).json({ error: "Invalid permission." });
-    if (policy.editor[permission as keyof import("@mai-chat/shared-types").WorkspacePermissions])
+    if (await db.hasWorkspacePermissionForUser(workspaceId, "editor", req.user!.id, permission))
       return res.status(409).json({ error: "You already have this permission." });
     if (!reason || reason.length > 1000)
       return res.status(400).json({ error: "Give a reason between 1 and 1,000 characters." });
-    const alreadyPending = (await db.listPermissionRequests(paramString(req.params.id))).some(
+    const alreadyPending = (await db.listPermissionRequests(workspaceId)).some(
       (item) => item.user_id === req.user!.id && item.permission === permission,
     );
     if (alreadyPending)
       return res.status(409).json({ error: "You already asked for this permission. An Admin will review it." });
-    res
-      .status(201)
-      .json(await db.createPermissionRequest(paramString(req.params.id), req.user!.id, permission, reason));
+    res.status(201).json(await db.createPermissionRequest(workspaceId, req.user!.id, permission, reason));
   });
   app.post("/workspaces/:id/permission-requests/:requestId/:decision", async (req: Request, res: Response) => {
     if (!(await requireRole(req, res, ["admin"]))) return;
@@ -340,14 +368,12 @@ export function registerWorkspacesRoutes({ app, deps, webAppUrl, requireRole }: 
     );
     if (!request) return res.status(404).json({ error: "Request not found." });
     if (decision === "approve") {
-      const policy = await db.getWorkspacePermissionPolicy(workspaceId);
-      policy.editor[request.permission] = true;
-      await db.setWorkspacePermissionPolicy(workspaceId, policy);
+      await db.setWorkspaceMemberPermissionGrant(workspaceId, request.user_id, request.permission, true);
       await db.notifyWorkspaceUser({
         workspaceId,
         userId: request.user_id,
         kind: "permission_request",
-        text: `${req.user!.displayName} approved your request for ${request.permission}. You can use it now.`,
+        text: `${req.user!.displayName} granted you ${request.permission}. You can use it now.`,
       });
     } else {
       await db.notifyWorkspaceUser({

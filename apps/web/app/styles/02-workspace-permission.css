@@ -121,6 +121,37 @@
   border-bottom: 1px solid var(--line);
 }
 
+.access-member-grants {
+  grid-column: 2 / -1;
+  margin-top: 2px;
+  color: var(--palette-slate-500);
+  font-size: 12px;
+}
+
+.access-member-grants summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--palette-violet-525);
+  font-weight: 700;
+}
+
+.access-member-grants > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  padding-top: 8px;
+}
+
+.access-member-grants label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.access-member-grants input {
+  accent-color: var(--palette-violet-525);
+}
+
 .access-join-policy h3 {
   margin: 0 0 4px;
   color: var(--palette-slate-675);

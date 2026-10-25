@@ -38,36 +38,45 @@ export interface GithubOAuthDeps {
   // storing the token, error redirects) without hitting github.com --
   // same "mock only the external network call" line as every other
   // package in this repo.
-  exchangeCodeForToken: (code: string, config: GithubOAuthConfig) => Promise<{ accessToken: string } | { error: string }>;
+  exchangeCodeForToken: (
+    code: string,
+    config: GithubOAuthConfig,
+  ) => Promise<{ accessToken: string } | { error: string }>;
   listRepositoriesForToken: typeof defaultListRepositoriesForToken;
 }
 
 async function defaultExchangeCodeForToken(
   code: string,
-  config: GithubOAuthConfig
+  config: GithubOAuthConfig,
 ): Promise<{ accessToken: string } | { error: string }> {
   try {
-  const res = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      code,
-      redirect_uri: config.redirectUri,
-    }), signal: AbortSignal.timeout(15_000),
-  });
-  const body = (await res.json().catch(() => ({}))) as {
-    access_token?: string;
-    error?: string;
-    error_description?: string;
-  };
-  if (!res.ok || !body.access_token) {
-    return { error: body.error_description ?? body.error ?? `GitHub token exchange failed (HTTP ${res.status})` };
-  }
-  return { accessToken: body.access_token };
+    const res = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        code,
+        redirect_uri: config.redirectUri,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      access_token?: string;
+      error?: string;
+      error_description?: string;
+    };
+    if (!res.ok || !body.access_token) {
+      return { error: body.error_description ?? body.error ?? `GitHub token exchange failed (HTTP ${res.status})` };
+    }
+    return { accessToken: body.access_token };
   } catch (error) {
-    return { error: error instanceof Error && error.name === "TimeoutError" ? "GitHub took too long to respond. Please try again." : "GitHub could not be reached. Please try again." };
+    return {
+      error:
+        error instanceof Error && error.name === "TimeoutError"
+          ? "GitHub took too long to respond. Please try again."
+          : "GitHub could not be reached. Please try again.",
+    };
   }
 }
 
@@ -82,7 +91,7 @@ function redirectTarget(
   config: GithubOAuthConfig,
   workspaceId: string | undefined,
   status: "connected" | "error",
-  message?: string
+  message?: string,
 ): string {
   const url = new URL(workspaceId ? `/w/${workspaceId}` : "/", config.webAppUrl);
   url.searchParams.set("github", status);
@@ -90,22 +99,35 @@ function redirectTarget(
   return url.toString();
 }
 
-export function registerGithubOAuthRoutes(app: Express, config: GithubOAuthConfig, deps: GithubOAuthDeps = defaultGithubOAuthDeps): void {
+export function registerGithubOAuthRoutes(
+  app: Express,
+  config: GithubOAuthConfig,
+  deps: GithubOAuthDeps = defaultGithubOAuthDeps,
+): void {
   app.get("/workspaces/:id/integrations/github/oauth/start", async (req: Request, res: Response) => {
     const workspaceId = paramString(req.params.id);
     if (!UUID_RE.test(workspaceId)) return res.status(400).json({ error: "invalid workspace id" });
     const workspace = await db.getWorkspaceById(workspaceId);
     if (!workspace) return res.status(404).json({ error: "not found" });
     const role = await db.getWorkspaceRole(workspaceId, req.user!.id);
-    if (!role || !(await db.hasWorkspacePermission(workspaceId, role, "connectTools"))) return res.status(403).json({ error: "You do not have permission to connect this tool." });
+    if (!role || !(await db.hasWorkspacePermissionForUser(workspaceId, role, req.user!.id, "connectTools")))
+      return res.status(403).json({ error: "You do not have permission to connect this tool." });
     if (!config.clientId || !config.clientSecret) {
       return res
         .status(503)
-        .json({ error: "GitHub login isn't configured on this server (GITHUB_OAUTH_CLIENT_ID/GITHUB_OAUTH_CLIENT_SECRET are not set)." });
+        .json({
+          error:
+            "GitHub login isn't configured on this server (GITHUB_OAUTH_CLIENT_ID/GITHUB_OAUTH_CLIENT_SECRET are not set).",
+        });
     }
 
     const state = randomUUID();
-    await db.saveOAuthPendingState(state, "github-integration", { workspaceId, userId: req.user!.id }, new Date(Date.now() + STATE_TTL_MS));
+    await db.saveOAuthPendingState(
+      state,
+      "github-integration",
+      { workspaceId, userId: req.user!.id },
+      new Date(Date.now() + STATE_TTL_MS),
+    );
 
     const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
     authorizeUrl.searchParams.set("client_id", config.clientId);
@@ -120,14 +142,22 @@ export function registerGithubOAuthRoutes(app: Express, config: GithubOAuthConfi
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const oauthError = typeof req.query.error === "string" ? req.query.error : "";
 
-    const pending = await db.consumeOAuthPendingState<{ workspaceId: string; userId: string }>(state, "github-integration");
+    const pending = await db.consumeOAuthPendingState<{ workspaceId: string; userId: string }>(
+      state,
+      "github-integration",
+    );
 
     if (oauthError) {
       return res.redirect(redirectTarget(config, pending?.workspaceId, "error", `GitHub said: ${oauthError}`));
     }
     if (!pending) {
       return res.redirect(
-        redirectTarget(config, undefined, "error", "That GitHub login link expired or was already used -- click Connect GitHub again.")
+        redirectTarget(
+          config,
+          undefined,
+          "error",
+          "That GitHub login link expired or was already used -- click Connect GitHub again.",
+        ),
       );
     }
     // The token is saved for whoever started this flow, so only that same
@@ -135,10 +165,19 @@ export function registerGithubOAuthRoutes(app: Express, config: GithubOAuthConfi
     // connection and send the provider's link to another person, whose
     // account would then be stored as theirs.
     if (req.user?.id !== pending.userId) {
-      return res.redirect(redirectTarget(config, pending.workspaceId, "error", "Please finish connecting in the same browser and account you started from."));
+      return res.redirect(
+        redirectTarget(
+          config,
+          pending.workspaceId,
+          "error",
+          "Please finish connecting in the same browser and account you started from.",
+        ),
+      );
     }
     if (!code) {
-      return res.redirect(redirectTarget(config, pending.workspaceId, "error", "GitHub didn't send back an authorization code."));
+      return res.redirect(
+        redirectTarget(config, pending.workspaceId, "error", "GitHub didn't send back an authorization code."),
+      );
     }
 
     const result = await deps.exchangeCodeForToken(code, config);
@@ -146,7 +185,11 @@ export function registerGithubOAuthRoutes(app: Express, config: GithubOAuthConfi
       return res.redirect(redirectTarget(config, pending.workspaceId, "error", result.error));
     }
 
-    await db.saveGithubOAuthToken({ workspaceId: pending.workspaceId, token: result.accessToken, ownerUserId: pending.userId });
+    await db.saveGithubOAuthToken({
+      workspaceId: pending.workspaceId,
+      token: result.accessToken,
+      ownerUserId: pending.userId,
+    });
     if (req.user) {
       await db.recordAuditEvent({
         workspaceId: pending.workspaceId,
@@ -167,7 +210,7 @@ export function registerGithubOAuthRoutes(app: Express, config: GithubOAuthConfi
     const workspace = await db.getWorkspaceById(workspaceId);
     if (!workspace) return res.status(404).json({ error: "not found" });
     const integration = (await db.listIntegrations(workspaceId)).find(
-      (candidate) => candidate.type === "github" && candidate.ownerUserId === req.user!.id
+      (candidate) => candidate.type === "github" && candidate.ownerUserId === req.user!.id,
     );
     const credential = integration ? await db.getIntegrationCredential(workspaceId, "github", integration.id) : null;
     if (!credential) return res.status(404).json({ error: "GitHub isn't connected for this workspace yet." });
@@ -175,7 +218,9 @@ export function registerGithubOAuthRoutes(app: Express, config: GithubOAuthConfi
       const repos = await deps.listRepositoriesForToken(credential.token);
       res.json(repos);
     } catch (err) {
-      res.status(502).json({ error: `could not list GitHub repositories: ${err instanceof Error ? err.message : String(err)}` });
+      res
+        .status(502)
+        .json({ error: `could not list GitHub repositories: ${err instanceof Error ? err.message : String(err)}` });
     }
   });
 }

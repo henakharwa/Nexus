@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { WorkspaceMember, WorkspaceRole } from "@mai-chat/shared-types";
+import type { WorkspaceMember, WorkspacePermissions, WorkspaceRole } from "@mai-chat/shared-types";
 import { useDialog } from "../../../_components/DialogProvider";
 import {
   describeError,
@@ -9,16 +9,25 @@ import {
   listWorkspaceJoinRequests,
   listWorkspaceInvitations,
   listWorkspaceMembers,
+  listWorkspaceMemberPermissionGrants,
   removeWorkspaceMember,
   resolveWorkspaceJoinRequest,
   revokeWorkspaceInvitation,
   sendWorkspaceInvitation,
+  setWorkspaceMemberPermissionGrant,
   updateWorkspaceJoinPolicy,
   updateWorkspaceMemberRole,
   type WorkspaceJoinRequest,
 } from "../../../../lib/api";
 import { colorForName, initialsForName } from "../../../../lib/avatar";
 import { CloseGlyph } from "./glyphs";
+
+const PERSONAL_PERMISSION_LABELS: Array<[keyof WorkspacePermissions, string]> = [
+  ["createAgents", "Create agents"],
+  ["publishAgents", "Publish agents"],
+  ["manageWorkflows", "Manage workflows"],
+  ["approveActions", "Approve actions"],
+];
 
 // Admin dialog: change members' roles, remove members, manage invitations.
 export default function AccessManager({
@@ -39,17 +48,26 @@ export default function AccessManager({
   const [approvalRequired, setApprovalRequired] = useState(false);
   const [joinRequests, setJoinRequests] = useState<WorkspaceJoinRequest[]>([]);
   const [savingJoinPolicy, setSavingJoinPolicy] = useState(false);
+  const [memberGrants, setMemberGrants] = useState<Record<string, Array<keyof WorkspacePermissions>>>({});
   const dialog = useDialog();
   useEffect(() => {
     Promise.all([
       listWorkspaceInvitations(workspaceId),
       getWorkspaceJoinPolicy(workspaceId),
       listWorkspaceJoinRequests(workspaceId),
+      Promise.all(
+        members
+          .filter((member) => member.role === "editor")
+          .map(
+            async (member) => [member.id, await listWorkspaceMemberPermissionGrants(workspaceId, member.id)] as const,
+          ),
+      ),
     ])
-      .then(([nextInvitations, policy, requests]) => {
+      .then(([nextInvitations, policy, requests, grants]) => {
         setInvitations(nextInvitations);
         setApprovalRequired(policy.approvalRequired);
         setJoinRequests(requests);
+        setMemberGrants(Object.fromEntries(grants));
       })
       .catch(() => {});
   }, [workspaceId]);
@@ -64,6 +82,20 @@ export default function AccessManager({
       setError(describeError(err, "Could not update the join policy."));
     } finally {
       setSavingJoinPolicy(false);
+    }
+  }
+
+  async function changeMemberGrant(member: WorkspaceMember, permission: keyof WorkspacePermissions, granted: boolean) {
+    try {
+      await setWorkspaceMemberPermissionGrant(workspaceId, member.id, permission, granted);
+      setMemberGrants((current) => ({
+        ...current,
+        [member.id]: granted
+          ? [...new Set([...(current[member.id] ?? []), permission])]
+          : (current[member.id] ?? []).filter((item) => item !== permission),
+      }));
+    } catch (err) {
+      setError(describeError(err, "Could not update this member's permission."));
     }
   }
 
@@ -155,6 +187,23 @@ export default function AccessManager({
               <button className="access-remove" type="button" onClick={() => void removeMember(member)}>
                 Remove
               </button>
+              {member.role === "editor" && (
+                <details className="access-member-grants">
+                  <summary>Extra permissions</summary>
+                  <div>
+                    {PERSONAL_PERMISSION_LABELS.map(([permission, label]) => (
+                      <label key={permission}>
+                        <input
+                          type="checkbox"
+                          checked={memberGrants[member.id]?.includes(permission) ?? false}
+                          onChange={(event) => void changeMemberGrant(member, permission, event.target.checked)}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           ))}
         </div>

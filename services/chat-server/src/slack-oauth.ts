@@ -85,63 +85,83 @@ export interface SlackOAuthDeps {
   // storing the token, error redirects) without hitting slack.com -- same
   // "mock only the external network call" line as every other package in
   // this repo (see github-oauth.ts's identical SlackOAuthDeps sibling).
-  exchangeCodeForToken: (code: string, config: SlackOAuthConfig) => Promise<{ accessToken: string; teamName?: string } | { error: string }>;
+  exchangeCodeForToken: (
+    code: string,
+    config: SlackOAuthConfig,
+  ) => Promise<{ accessToken: string; teamName?: string } | { error: string }>;
 }
 
 async function defaultExchangeCodeForToken(
   code: string,
-  config: SlackOAuthConfig
+  config: SlackOAuthConfig,
 ): Promise<{ accessToken: string; teamName?: string } | { error: string }> {
   try {
-  const body = new URLSearchParams({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    code,
-    redirect_uri: config.redirectUri,
-  });
-  const res = await fetch(SLACK_TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: body.toString(), signal: AbortSignal.timeout(15_000),
-  });
-  // Slack's Web API convention (every api.slack.com/methods/* endpoint,
-  // oauth.v2.access included) is to always return HTTP 200 with an `ok`
-  // boolean, errors included -- checking `res.ok` alone would miss a real
-  // failure, so `ok`/`error` from the parsed body are checked instead,
-  // the same convention @slack/web-api itself relies on internally.
-  //
-  // NOT YET LIVE-VERIFIED: oauth.v2.user.access is a newer endpoint
-  // (alongside Slack's MCP server, launched 2026-02-17) and its exact
-  // response shape wasn't in any documentation page this session could
-  // fetch -- the field names below (`access_token` at the top level,
-  // `team.name`) follow Slack's long-established oauth.v2.access
-  // convention for a user-token grant, but this is inferred, not
-  // confirmed against a real response. If this breaks, the raw response
-  // logged below is the first thing to check -- likely just a field
-  // rename (e.g. an `authed_user.access_token` nesting instead of a
-  // top-level one) to fix here, not a sign the whole approach is wrong.
-  const raw = await res.text();
-  let parsed: { ok?: boolean; access_token?: string; authed_user?: { access_token?: string }; team?: { name?: string }; error?: string };
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { error: `Slack's token endpoint returned a non-JSON response (HTTP ${res.status}): ${raw.slice(0, 300)}` };
-  }
-  if (!parsed.ok) {
-    return { error: parsed.error ?? `Slack rejected the code exchange (HTTP ${res.status}): ${raw.slice(0, 300)}` };
-  }
-  const accessToken = parsed.access_token ?? parsed.authed_user?.access_token;
-  if (!accessToken) {
-    console.error("[slack-oauth] Slack's token response had no access_token in either shape this code checks -- raw response:", raw);
+    const body = new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      code,
+      redirect_uri: config.redirectUri,
+    });
+    const res = await fetch(SLACK_TOKEN_URL, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      signal: AbortSignal.timeout(15_000),
+    });
+    // Slack's Web API convention (every api.slack.com/methods/* endpoint,
+    // oauth.v2.access included) is to always return HTTP 200 with an `ok`
+    // boolean, errors included -- checking `res.ok` alone would miss a real
+    // failure, so `ok`/`error` from the parsed body are checked instead,
+    // the same convention @slack/web-api itself relies on internally.
+    //
+    // NOT YET LIVE-VERIFIED: oauth.v2.user.access is a newer endpoint
+    // (alongside Slack's MCP server, launched 2026-02-17) and its exact
+    // response shape wasn't in any documentation page this session could
+    // fetch -- the field names below (`access_token` at the top level,
+    // `team.name`) follow Slack's long-established oauth.v2.access
+    // convention for a user-token grant, but this is inferred, not
+    // confirmed against a real response. If this breaks, the raw response
+    // logged below is the first thing to check -- likely just a field
+    // rename (e.g. an `authed_user.access_token` nesting instead of a
+    // top-level one) to fix here, not a sign the whole approach is wrong.
+    const raw = await res.text();
+    let parsed: {
+      ok?: boolean;
+      access_token?: string;
+      authed_user?: { access_token?: string };
+      team?: { name?: string };
+      error?: string;
+    };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return {
+        error: `Slack's token endpoint returned a non-JSON response (HTTP ${res.status}): ${raw.slice(0, 300)}`,
+      };
+    }
+    if (!parsed.ok) {
+      return { error: parsed.error ?? `Slack rejected the code exchange (HTTP ${res.status}): ${raw.slice(0, 300)}` };
+    }
+    const accessToken = parsed.access_token ?? parsed.authed_user?.access_token;
+    if (!accessToken) {
+      console.error(
+        "[slack-oauth] Slack's token response had no access_token in either shape this code checks -- raw response:",
+        raw,
+      );
+      return {
+        error:
+          "Slack accepted the login but this server couldn't find an access token in its response -- see the chat-server's own " +
+          "terminal for the raw response that was logged.",
+      };
+    }
+    return { accessToken, teamName: parsed.team?.name };
+  } catch (error) {
     return {
       error:
-        "Slack accepted the login but this server couldn't find an access token in its response -- see the chat-server's own " +
-        "terminal for the raw response that was logged.",
+        error instanceof Error && error.name === "TimeoutError"
+          ? "Slack took too long to respond. Please try again."
+          : "Slack could not be reached. Please try again.",
     };
-  }
-  return { accessToken, teamName: parsed.team?.name };
-  } catch (error) {
-    return { error: error instanceof Error && error.name === "TimeoutError" ? "Slack took too long to respond. Please try again." : "Slack could not be reached. Please try again." };
   }
 }
 
@@ -155,7 +175,7 @@ function redirectTarget(
   config: SlackOAuthConfig,
   workspaceId: string | undefined,
   status: "connected" | "error",
-  message?: string
+  message?: string,
 ): string {
   const url = new URL(workspaceId ? `/w/${workspaceId}` : "/", config.webAppUrl);
   url.searchParams.set("slack", status);
@@ -163,22 +183,35 @@ function redirectTarget(
   return url.toString();
 }
 
-export function registerSlackOAuthRoutes(app: Express, config: SlackOAuthConfig, deps: SlackOAuthDeps = defaultSlackOAuthDeps): void {
+export function registerSlackOAuthRoutes(
+  app: Express,
+  config: SlackOAuthConfig,
+  deps: SlackOAuthDeps = defaultSlackOAuthDeps,
+): void {
   app.get("/workspaces/:id/integrations/slack/oauth/start", async (req: Request, res: Response) => {
     const workspaceId = paramString(req.params.id);
     if (!UUID_RE.test(workspaceId)) return res.status(400).json({ error: "invalid workspace id" });
     const workspace = await db.getWorkspaceById(workspaceId);
     if (!workspace) return res.status(404).json({ error: "not found" });
     const role = await db.getWorkspaceRole(workspaceId, req.user!.id);
-    if (!role || !(await db.hasWorkspacePermission(workspaceId, role, "connectTools"))) return res.status(403).json({ error: "You do not have permission to connect this tool." });
+    if (!role || !(await db.hasWorkspacePermissionForUser(workspaceId, role, req.user!.id, "connectTools")))
+      return res.status(403).json({ error: "You do not have permission to connect this tool." });
     if (!config.clientId || !config.clientSecret) {
       return res
         .status(503)
-        .json({ error: "Slack login isn't configured on this server (SLACK_OAUTH_CLIENT_ID/SLACK_OAUTH_CLIENT_SECRET are not set)." });
+        .json({
+          error:
+            "Slack login isn't configured on this server (SLACK_OAUTH_CLIENT_ID/SLACK_OAUTH_CLIENT_SECRET are not set).",
+        });
     }
 
     const state = randomUUID();
-    await db.saveOAuthPendingState(state, "slack-integration", { workspaceId, userId: req.user!.id }, new Date(Date.now() + STATE_TTL_MS));
+    await db.saveOAuthPendingState(
+      state,
+      "slack-integration",
+      { workspaceId, userId: req.user!.id },
+      new Date(Date.now() + STATE_TTL_MS),
+    );
 
     const authorizeUrl = new URL(SLACK_AUTHORIZE_URL);
     authorizeUrl.searchParams.set("client_id", config.clientId);
@@ -201,14 +234,22 @@ export function registerSlackOAuthRoutes(app: Express, config: SlackOAuthConfig,
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const oauthError = typeof req.query.error === "string" ? req.query.error : "";
 
-    const pending = await db.consumeOAuthPendingState<{ workspaceId: string; userId: string }>(state, "slack-integration");
+    const pending = await db.consumeOAuthPendingState<{ workspaceId: string; userId: string }>(
+      state,
+      "slack-integration",
+    );
 
     if (oauthError) {
       return res.redirect(redirectTarget(config, pending?.workspaceId, "error", `Slack said: ${oauthError}`));
     }
     if (!pending) {
       return res.redirect(
-        redirectTarget(config, undefined, "error", "That Slack login link expired or was already used -- click Log in with Slack again.")
+        redirectTarget(
+          config,
+          undefined,
+          "error",
+          "That Slack login link expired or was already used -- click Log in with Slack again.",
+        ),
       );
     }
     // The token is saved for whoever started this flow, so only that same
@@ -216,10 +257,19 @@ export function registerSlackOAuthRoutes(app: Express, config: SlackOAuthConfig,
     // connection and send the provider's link to another person, whose
     // account would then be stored as theirs.
     if (req.user?.id !== pending.userId) {
-      return res.redirect(redirectTarget(config, pending.workspaceId, "error", "Please finish connecting in the same browser and account you started from."));
+      return res.redirect(
+        redirectTarget(
+          config,
+          pending.workspaceId,
+          "error",
+          "Please finish connecting in the same browser and account you started from.",
+        ),
+      );
     }
     if (!code) {
-      return res.redirect(redirectTarget(config, pending.workspaceId, "error", "Slack didn't send back an authorization code."));
+      return res.redirect(
+        redirectTarget(config, pending.workspaceId, "error", "Slack didn't send back an authorization code."),
+      );
     }
 
     const result = await deps.exchangeCodeForToken(code, config);

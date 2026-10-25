@@ -134,6 +134,31 @@ export async function removeWorkspaceMember(workspaceId: string, userId: string)
   if (!res.ok) await parseJsonOrThrow(res);
 }
 
+export async function listWorkspaceMemberPermissionGrants(
+  workspaceId: string,
+  userId: string,
+): Promise<Array<keyof import("@mai-chat/shared-types").WorkspacePermissions>> {
+  const res = await authenticatedFetch(
+    `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}/permission-grants`,
+  );
+  return (
+    (await parseJsonOrThrow(res)) as { permissions: Array<keyof import("@mai-chat/shared-types").WorkspacePermissions> }
+  ).permissions;
+}
+
+export async function setWorkspaceMemberPermissionGrant(
+  workspaceId: string,
+  userId: string,
+  permission: keyof import("@mai-chat/shared-types").WorkspacePermissions,
+  granted: boolean,
+): Promise<void> {
+  const res = await authenticatedFetch(
+    `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}/permission-grants/${encodeURIComponent(permission)}`,
+    { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ granted }) },
+  );
+  if (!res.ok) await parseJsonOrThrow(res);
+}
+
 export async function leaveWorkspace(workspaceId: string): Promise<void> {
   const res = await authenticatedFetch(`${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/membership`, {
     method: "DELETE",

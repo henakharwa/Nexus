@@ -11,7 +11,13 @@ import { buildNotionTools } from "./notion-tools.js";
 import { buildFigmaTools } from "./figma-tools.js";
 import type { IntegrationType, PendingAction, TeamActivity } from "@mai-chat/shared-types";
 import { offlineGithubTeamApi, type GithubChangedFile, type GithubTeamApi, type RepoAccess } from "./github-api.js";
-import { describeActionTarget, findActionWarnings, guardGithubTools, providerForTool, type GithubWorkspaceContext } from "./github-team.js";
+import {
+  describeActionTarget,
+  findActionWarnings,
+  guardGithubTools,
+  providerForTool,
+  type GithubWorkspaceContext,
+} from "./github-team.js";
 import { actionFacts, evaluateApprovalRules, isSlackId, standingScope } from "./approval-rules.js";
 import type { ActionTarget, ChangePreview, ProposalContext, StandingApproval } from "@mai-chat/shared-types";
 import { buildChangePreview, fullText } from "./change-preview.js";
@@ -74,12 +80,33 @@ export interface WorkspaceTools {
 export interface GithubLookups {
   pullRequestBase(owner: string, repo: string, number: number): Promise<string | null>;
   defaultBranch(owner: string, repo: string): Promise<string | null>;
-  branchProtection(owner: string, repo: string, branch: string): Promise<{ protected: boolean; requiredReviews: number | null } | null>;
+  branchProtection(
+    owner: string,
+    repo: string,
+    branch: string,
+  ): Promise<{ protected: boolean; requiredReviews: number | null } | null>;
   // For change previews (change-preview.ts). Optional so tests can omit them.
-  fileText?(owner: string, repo: string, path: string, ref: string | null): Promise<{ exists: true; text: string } | { exists: false } | null>;
-  pullRequest?(owner: string, repo: string, number: number): Promise<{ title: string; body: string; head: string; base: string; state: string } | null>;
-  changedFiles?(owner: string, repo: string, which: { pullNumber: number } | { base: string; head: string }): Promise<GithubChangedFile[] | null>;
-  issue?(owner: string, repo: string, number: number): Promise<{ title: string; body: string; state: string; labels: string[] } | null>;
+  fileText?(
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string | null,
+  ): Promise<{ exists: true; text: string } | { exists: false } | null>;
+  pullRequest?(
+    owner: string,
+    repo: string,
+    number: number,
+  ): Promise<{ title: string; body: string; head: string; base: string; state: string } | null>;
+  changedFiles?(
+    owner: string,
+    repo: string,
+    which: { pullNumber: number } | { base: string; head: string },
+  ): Promise<GithubChangedFile[] | null>;
+  issue?(
+    owner: string,
+    repo: string,
+    number: number,
+  ): Promise<{ title: string; body: string; state: string; labels: string[] } | null>;
 }
 
 export interface BuildToolsOptions {
@@ -96,7 +123,12 @@ export function teamApiFor(deps: CreateServerDeps): GithubTeamApi {
 // wraps the mutating ones via wrapForProposal below before handing them to
 // the LLM) and by the confirm route below (which needs the SAME tools,
 // unwrapped, to actually run one once a human approves it).
-export async function buildToolsForWorkspace(workspaceId: string, deps: CreateServerDeps, requestingUserId?: string, options: BuildToolsOptions = {}): Promise<WorkspaceTools> {
+export async function buildToolsForWorkspace(
+  workspaceId: string,
+  deps: CreateServerDeps,
+  requestingUserId?: string,
+  options: BuildToolsOptions = {},
+): Promise<WorkspaceTools> {
   const available = await db.listIntegrations(workspaceId);
   const api = teamApiFor(deps);
   // A member can work only through a connection they own. This preserves
@@ -132,13 +164,20 @@ export async function buildToolsForWorkspace(workspaceId: string, deps: CreateSe
       accounts.github = { via: "user", userId: requestingUserId ?? null, account };
       listOpenIssues = (issueOwner, issueRepo) => api.listOpenIssues(token, issueOwner, issueRepo);
       githubLookups = {
-        pullRequestBase: async (lookupOwner, lookupRepo, number) => (api.getPullRequestBase ? api.getPullRequestBase(token, lookupOwner, lookupRepo, number) : null),
-        defaultBranch: async (lookupOwner, lookupRepo) => (api.getDefaultBranch ? api.getDefaultBranch(token, lookupOwner, lookupRepo) : null),
-        branchProtection: async (lookupOwner, lookupRepo, branch) => (api.getBranchProtection ? api.getBranchProtection(token, lookupOwner, lookupRepo, branch) : null),
-        fileText: async (lookupOwner, lookupRepo, path, ref) => (api.getFileText ? api.getFileText(token, lookupOwner, lookupRepo, path, ref) : null),
-        pullRequest: async (lookupOwner, lookupRepo, number) => (api.getPullRequest ? api.getPullRequest(token, lookupOwner, lookupRepo, number) : null),
-        changedFiles: async (lookupOwner, lookupRepo, which) => (api.listChangedFiles ? api.listChangedFiles(token, lookupOwner, lookupRepo, which) : null),
-        issue: async (lookupOwner, lookupRepo, number) => (api.getIssue ? api.getIssue(token, lookupOwner, lookupRepo, number) : null),
+        pullRequestBase: async (lookupOwner, lookupRepo, number) =>
+          api.getPullRequestBase ? api.getPullRequestBase(token, lookupOwner, lookupRepo, number) : null,
+        defaultBranch: async (lookupOwner, lookupRepo) =>
+          api.getDefaultBranch ? api.getDefaultBranch(token, lookupOwner, lookupRepo) : null,
+        branchProtection: async (lookupOwner, lookupRepo, branch) =>
+          api.getBranchProtection ? api.getBranchProtection(token, lookupOwner, lookupRepo, branch) : null,
+        fileText: async (lookupOwner, lookupRepo, path, ref) =>
+          api.getFileText ? api.getFileText(token, lookupOwner, lookupRepo, path, ref) : null,
+        pullRequest: async (lookupOwner, lookupRepo, number) =>
+          api.getPullRequest ? api.getPullRequest(token, lookupOwner, lookupRepo, number) : null,
+        changedFiles: async (lookupOwner, lookupRepo, which) =>
+          api.listChangedFiles ? api.listChangedFiles(token, lookupOwner, lookupRepo, which) : null,
+        issue: async (lookupOwner, lookupRepo, number) =>
+          api.getIssue ? api.getIssue(token, lookupOwner, lookupRepo, number) : null,
       };
     } catch (err) {
       // A misconfigured/unreachable GitHub MCP server (e.g. Docker isn't
@@ -158,8 +197,10 @@ export async function buildToolsForWorkspace(workspaceId: string, deps: CreateSe
           login = await api.getLogin(credential.token);
           if (login) await db.setIntegrationAccountLogin(integration.id, login).catch(() => undefined);
         }
-        if (credential.owner && credential.repo) await loadGithub(credential.token, login, credential.owner, credential.repo);
-        else githubNotice = `${actingUser?.displayName ?? "The person asking"} connected GitHub but hasn't chosen a repository yet. They can choose one under Integrations → GitHub.`;
+        if (credential.owner && credential.repo)
+          await loadGithub(credential.token, login, credential.owner, credential.repo);
+        else
+          githubNotice = `${actingUser?.displayName ?? "The person asking"} connected GitHub but hasn't chosen a repository yet. They can choose one under Integrations → GitHub.`;
       }
     } else if (integration.type === "slack") {
       const credential = await db.getIntegrationCredential(workspaceId, "slack", integration.id);
@@ -205,22 +246,57 @@ export async function buildToolsForWorkspace(workspaceId: string, deps: CreateSe
       const credential = await db.getIntegrationCredential(workspaceId, integration.type, integration.id);
       if (credential?.token && integration.endpoint) {
         try {
-          const client = await getRemoteMcpClient(workspaceId, integration.type, integration.endpoint, credential.token);
-          const providerTools = await listMcpToolExecutors(client, integration.type[0].toUpperCase() + integration.type.slice(1));
+          const client = await getRemoteMcpClient(
+            workspaceId,
+            integration.type,
+            integration.endpoint,
+            credential.token,
+          );
+          const providerTools = await listMcpToolExecutors(
+            client,
+            integration.type[0].toUpperCase() + integration.type.slice(1),
+          );
           tools.push(...providerTools);
           remoteAgentTools[integration.type].push(...providerTools);
-          accounts[integration.type] = { via: "user", userId: requestingUserId ?? null, account: integration.accountName ?? null };
+          accounts[integration.type] = {
+            via: "user",
+            userId: requestingUserId ?? null,
+            account: integration.accountName ?? null,
+          };
         } catch (err) {
-          console.error(`[actions] workspace ${workspaceId}: ${integration.type} MCP tools unavailable:`, errMessage(err));
+          console.error(
+            `[actions] workspace ${workspaceId}: ${integration.type} MCP tools unavailable:`,
+            errMessage(err),
+          );
         }
       }
     }
   }
 
-  return { tools, githubTools: githubAgentTools, slackTools: slackAgentTools, linearTools: remoteAgentTools.linear, notionTools: remoteAgentTools.notion, figmaTools: remoteAgentTools.figma, githubContext, githubNotice, accounts, listOpenIssues, githubLookups, slackChannelName, findSlackChannels };
+  return {
+    tools,
+    githubTools: githubAgentTools,
+    slackTools: slackAgentTools,
+    linearTools: remoteAgentTools.linear,
+    notionTools: remoteAgentTools.notion,
+    figmaTools: remoteAgentTools.figma,
+    githubContext,
+    githubNotice,
+    accounts,
+    listOpenIssues,
+    githubLookups,
+    slackChannelName,
+    findSlackChannels,
+  };
 }
 
-export const PROVIDER_LABELS: Record<IntegrationType, string> = { github: "GitHub", slack: "Slack", linear: "Linear", notion: "Notion", figma: "Figma" };
+export const PROVIDER_LABELS: Record<IntegrationType, string> = {
+  github: "GitHub",
+  slack: "Slack",
+  linear: "Linear",
+  notion: "Notion",
+  figma: "Figma",
+};
 
 /** How a provider account is shown, e.g. "@octocat" for GitHub. */
 export function formatAccount(provider: IntegrationType, account: string | null | undefined): string | null {
@@ -264,7 +340,7 @@ export function wrapForProposal(
     // Why the agent is proposing this: the request and its recent reads
     // (see recordReads), captured at the moment of the proposal.
     proposalContext?: () => ProposalContext | null;
-  }
+  },
 ): ToolExecutor[] {
   // An automation review must never be able to turn an unexpected model
   // tool call into a pending external change. Remove mutating tools from its
@@ -289,10 +365,20 @@ export function wrapForProposal(
         // an auto-approved one runs now. Loading the rules is not wrapped in
         // a catch on purpose -- if they can't be read, the proposal fails
         // rather than skipping a rule that might block it.
-        const decision = evaluateApprovalRules(await db.listApprovalRules(workspaceId), actionFacts(toolName, args, target), { allowAutoApprove: options?.allowAutoApprove !== false });
+        const decision = evaluateApprovalRules(
+          await db.listApprovalRules(workspaceId),
+          actionFacts(toolName, args, target),
+          { allowAutoApprove: options?.allowAutoApprove !== false },
+        );
         const roomId = `${workspaceId}:${conversationId}`;
         if (decision.effect === "block") {
-          const message = await db.insertMessage({ workspaceId, conversationId, role: "system", authorName: "System", content: `Blocked by approval rule “${decision.ruleName}”: ${description}` });
+          const message = await db.insertMessage({
+            workspaceId,
+            conversationId,
+            role: "system",
+            authorName: "System",
+            content: `Blocked by approval rule “${decision.ruleName}”: ${description}`,
+          });
           rooms.broadcast(roomId, { type: "message", message });
           await db.recordAuditEvent({
             workspaceId,
@@ -300,7 +386,15 @@ export function wrapForProposal(
             actorType: "system",
             actorName: "Approval rules",
             summary: `Approval rule “${decision.ruleName}” blocked: ${description}${requestedBy?.name ? ` (requested by ${requestedBy.name})` : ""}`,
-            metadata: { toolName, ruleId: decision.ruleId, ruleName: decision.ruleName, requestedByUserId: requestedBy?.userId ?? null, requestedByName: requestedBy?.name ?? null, target: target.label, repo: target.repo ?? null },
+            metadata: {
+              toolName,
+              ruleId: decision.ruleId,
+              ruleName: decision.ruleName,
+              requestedByUserId: requestedBy?.userId ?? null,
+              requestedByName: requestedBy?.name ?? null,
+              target: target.label,
+              repo: target.repo ?? null,
+            },
           });
           return {
             status: "blocked_by_rule",
@@ -317,17 +411,63 @@ export function wrapForProposal(
           const [owner, repo] = target.repo.split("/");
           openIssues = await options.listOpenIssues(owner, repo).catch(() => []);
         }
-        const warnings = findActionWarnings({ target, toolName, requestedByUserId: requestedBy?.userId, existing, openIssues });
+        const warnings = findActionWarnings({
+          target,
+          toolName,
+          requestedByUserId: requestedBy?.userId,
+          existing,
+          openIssues,
+        });
         const runAs = options?.runAs;
         const autoApproveAllowed = options?.allowAutoApprove !== false;
         if (decision.effect === "auto_approve") {
-          return runAutoApproved({ tool, args, workspaceId, conversationId, rooms, requestedBy, agentKind, runAs, toolName, description, preview, target, warnings, changePreview, proposalContext, source: { kind: "rule", ruleId: decision.ruleId!, ruleName: decision.ruleName! } });
+          return runAutoApproved({
+            tool,
+            args,
+            workspaceId,
+            conversationId,
+            rooms,
+            requestedBy,
+            agentKind,
+            runAs,
+            toolName,
+            description,
+            preview,
+            target,
+            warnings,
+            changePreview,
+            proposalContext,
+            source: { kind: "rule", ruleId: decision.ruleId!, ruleName: decision.ruleName! },
+          });
         }
         // A standing approval applies only where no rule asks for more than
         // a normal approval card, and never to a "Requires approval" workflow.
         if (decision.effect === "default" && autoApproveAllowed) {
-          const standing = await db.findStandingApproval(workspaceId, target.provider, toolName, standingScope(target).scope);
-          if (standing) return runAutoApproved({ tool, args, workspaceId, conversationId, rooms, requestedBy, agentKind, runAs, toolName, description, preview, target, warnings, changePreview, proposalContext, source: { kind: "standing", approval: standing } });
+          const standing = await db.findStandingApproval(
+            workspaceId,
+            target.provider,
+            toolName,
+            standingScope(target).scope,
+          );
+          if (standing)
+            return runAutoApproved({
+              tool,
+              args,
+              workspaceId,
+              conversationId,
+              rooms,
+              requestedBy,
+              agentKind,
+              runAs,
+              toolName,
+              description,
+              preview,
+              target,
+              warnings,
+              changePreview,
+              proposalContext,
+              source: { kind: "standing", approval: standing },
+            });
         }
         const ruleNeedsApprovals = decision.effect === "require_approvals";
         const action = await db.createPendingAction({
@@ -340,7 +480,7 @@ export function wrapForProposal(
           requestedByUserId: requestedBy?.userId,
           requestedByName: requestedBy?.name,
           agentKind: agentKind ?? null,
-          runAsUserId: runAs ? runAs.userId : requestedBy?.userId ?? null,
+          runAsUserId: runAs ? runAs.userId : (requestedBy?.userId ?? null),
           runAsAccount: runAs?.account ?? null,
           target,
           warnings,
@@ -367,7 +507,18 @@ export function wrapForProposal(
           actorType: "agent",
           actorName: "Agent",
           summary: `Agent prepared an action for review${requestedBy?.name ? ` (requested by ${requestedBy.name})` : ""}: ${description}`,
-          metadata: { actionId: action.id, toolName: action.toolName, requestedByUserId: requestedBy?.userId ?? null, requestedByName: requestedBy?.name ?? null, target: target.label, repo: target.repo ?? null, warnings: warnings.length, requiredApprovals: decision.requiredApprovals, ruleId: decision.ruleId, ruleName: decision.ruleName },
+          metadata: {
+            actionId: action.id,
+            toolName: action.toolName,
+            requestedByUserId: requestedBy?.userId ?? null,
+            requestedByName: requestedBy?.name ?? null,
+            target: target.label,
+            repo: target.repo ?? null,
+            warnings: warnings.length,
+            requiredApprovals: decision.requiredApprovals,
+            ruleId: decision.ruleId,
+            ruleName: decision.ruleName,
+          },
         });
         return {
           status: "awaiting_user_confirmation",
@@ -394,7 +545,7 @@ async function enrichTarget(
   toolName: string,
   args: Record<string, unknown>,
   target: ActionTarget,
-  options?: { githubLookups?: GithubLookups; slackChannelName?: WorkspaceTools["slackChannelName"] }
+  options?: { githubLookups?: GithubLookups; slackChannelName?: WorkspaceTools["slackChannelName"] },
 ): Promise<ActionTarget> {
   const enriched: ActionTarget = { ...target };
   const named = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
@@ -403,11 +554,18 @@ async function enrichTarget(
     const [owner, repo] = target.repo.split("/");
     if ((target.kind === "merge" || target.kind === "pull_request_update") && target.number) {
       enriched.baseBranch = (await lookups.pullRequestBase(owner, repo, target.number).catch(() => null)) ?? undefined;
-    } else if ((target.kind === "file" && !named(args.branch)) || (toolName === "create_pull_request" && !named(args.base))) {
+    } else if (
+      (target.kind === "file" && !named(args.branch)) ||
+      (toolName === "create_pull_request" && !named(args.base))
+    ) {
       enriched.baseBranch = (await lookups.defaultBranch(owner, repo).catch(() => null)) ?? undefined;
     }
     const facts = actionFacts(toolName, args, enriched);
-    if (facts.branch && ["merge", "file_change", "create", "update"].includes(facts.category) && target.kind !== "new_issue") {
+    if (
+      facts.branch &&
+      ["merge", "file_change", "create", "update"].includes(facts.category) &&
+      target.kind !== "new_issue"
+    ) {
       const protection = await lookups.branchProtection(owner, repo, facts.branch).catch(() => null);
       if (protection) enriched.branchProtection = { branch: facts.branch, ...protection };
     }
@@ -439,12 +597,18 @@ function approvalsPhrase(count: number): string {
 /** One line for team awareness: whose agent changed what, and who approved it. */
 function activityLine(action: PendingAction, requester: string, approvedBy: string | null): string {
   if (!action.target) return `${approvedBy ?? requester} confirmed: ${action.description}`;
-  const change = action.target.kind === "comment" ? `comment on ${action.target.label}` : action.target.kind.startsWith("new_") ? action.target.label : `change to ${action.target.label}`;
+  const change =
+    action.target.kind === "comment"
+      ? `comment on ${action.target.label}`
+      : action.target.kind.startsWith("new_")
+        ? action.target.label
+        : `change to ${action.target.label}`;
   return `${requester}'s agent made a ${change}${approvedBy && approvedBy !== requester ? ` (approved by ${approvedBy})` : ""}`;
 }
 
 /** What approved an action without a person deciding on it. */
-type AutoApprovalSource = { kind: "rule"; ruleId: string; ruleName: string } | { kind: "standing"; approval: StandingApproval };
+type AutoApprovalSource =
+  { kind: "rule"; ruleId: string; ruleName: string } | { kind: "standing"; approval: StandingApproval };
 
 function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -452,7 +616,9 @@ function shortDate(iso: string): string {
 
 /** e.g. 'rule “Comments are fine”' or "Marcus's standing approval (add issue comment on acme/web, until Oct 31)". */
 function autoApprovalPhrase(source: AutoApprovalSource): string {
-  return source.kind === "rule" ? `rule “${source.ruleName}”` : `${source.approval.createdByName}'s standing approval (${source.approval.description}, until ${shortDate(source.approval.expiresAt)})`;
+  return source.kind === "rule"
+    ? `rule “${source.ruleName}”`
+    : `${source.approval.createdByName}'s standing approval (${source.approval.description}, until ${shortDate(source.approval.expiresAt)})`;
 }
 
 // Runs an action that an auto-approve rule or a standing approval allows,
@@ -479,10 +645,13 @@ async function runAutoApproved(input: {
 }): Promise<unknown> {
   const { workspaceId, conversationId, rooms, requestedBy, description, source } = input;
   const by = autoApprovalPhrase(source);
-  const sourceMetadata = source.kind === "rule" ? { ruleId: source.ruleId, ruleName: source.ruleName } : { standingApprovalId: source.approval.id, standingApprovalBy: source.approval.createdByName };
+  const sourceMetadata =
+    source.kind === "rule"
+      ? { ruleId: source.ruleId, ruleName: source.ruleName }
+      : { standingApprovalId: source.approval.id, standingApprovalBy: source.approval.createdByName };
   const roomId = `${workspaceId}:${conversationId}`;
   const provider = input.target.provider;
-  const runUserId = input.runAs ? input.runAs.userId : requestedBy?.userId ?? null;
+  const runUserId = input.runAs ? input.runAs.userId : (requestedBy?.userId ?? null);
   const action = await db.createPendingAction({
     workspaceId,
     conversationId,
@@ -499,14 +668,16 @@ async function runAutoApproved(input: {
     warnings: input.warnings,
     requiredApprovals: 0,
     approvalRuleId: source.kind === "rule" ? source.ruleId : null,
-    approvalRuleName: source.kind === "rule" ? source.ruleName : `Standing approval from ${source.approval.createdByName}`,
+    approvalRuleName:
+      source.kind === "rule" ? source.ruleName : `Standing approval from ${source.approval.createdByName}`,
     autoApproved: true,
     changePreview: input.changePreview ?? null,
     proposalContext: input.proposalContext ?? null,
   });
   const account = formatAccount(provider, input.runAs?.account);
   const asName = requestedBy?.name ?? "the requester";
-  const watchers = () => rooms.participants(roomId).flatMap((participant) => (participant.userId ? [participant.userId] : []));
+  const watchers = () =>
+    rooms.participants(roomId).flatMap((participant) => (participant.userId ? [participant.userId] : []));
   try {
     const result = await input.tool.execute(input.args);
     const resultText = typeof result === "string" ? result : JSON.stringify(result);
@@ -520,7 +691,13 @@ async function runAutoApproved(input: {
       content: `Auto-approved by ${by}: ${description}. Ran as ${asName}${account ? ` (${account})` : ""}.`,
     });
     rooms.broadcast(roomId, { type: "message", message });
-    await db.notifyWorkspaceMembers({ workspaceId, conversationId, kind: "action_completed", text: `Auto-approved by ${by} and completed: ${description}`, excludeUserIds: watchers() });
+    await db.notifyWorkspaceMembers({
+      workspaceId,
+      conversationId,
+      kind: "action_completed",
+      text: `Auto-approved by ${by} and completed: ${description}`,
+      excludeUserIds: watchers(),
+    });
     const activity = `${activityLine(action, asName, null)} (auto-approved by ${source.kind === "rule" ? by : `${source.approval.createdByName}'s standing approval`})`;
     const url = resultUrl(resultText);
     const event = await db.recordAuditEvent({
@@ -529,9 +706,27 @@ async function runAutoApproved(input: {
       actorType: "system",
       actorName: "Approval rules",
       summary: `Auto-approved by ${by}: ${description}${requestedBy?.name ? ` (requested by ${requestedBy.name})` : ""}`,
-      metadata: { actionId: action.id, toolName: input.toolName, provider, ...sourceMetadata, target: input.target.label, repo: input.target.repo ?? null, executedAs: account ?? asName, activity, url },
+      metadata: {
+        actionId: action.id,
+        toolName: input.toolName,
+        provider,
+        ...sourceMetadata,
+        target: input.target.label,
+        repo: input.target.repo ?? null,
+        executedAs: account ?? asName,
+        activity,
+        url,
+      },
     });
-    const teamActivity: TeamActivity = { id: event.id, source: "nexus", actorName: asName, summary: activity, repo: input.target.repo ?? null, url, createdAt: event.createdAt };
+    const teamActivity: TeamActivity = {
+      id: event.id,
+      source: "nexus",
+      actorName: asName,
+      summary: activity,
+      repo: input.target.repo ?? null,
+      url,
+      createdAt: event.createdAt,
+    };
     rooms.broadcast(workspaceId, { type: "team_activity", activity: teamActivity });
     return {
       status: "completed",
@@ -542,10 +737,19 @@ async function runAutoApproved(input: {
     };
   } catch (err) {
     const failureReason = errMessage(err);
-    console.error(`[actions] workspace ${workspaceId}: auto-approved action ${action.id} (${input.toolName}) failed:`, failureReason);
+    console.error(
+      `[actions] workspace ${workspaceId}: auto-approved action ${action.id} (${input.toolName}) failed:`,
+      failureReason,
+    );
     captureError(err, { where: "action-auto-approve", workspaceId, actionId: action.id, toolName: input.toolName });
     await db.resolvePendingAction({ workspaceId, id: action.id, status: "failed", result: failureReason });
-    const message = await db.insertMessage({ workspaceId, conversationId, role: "system", authorName: "System", content: `Auto-approved by ${by}, but it failed: ${description}. ${failureReason}` });
+    const message = await db.insertMessage({
+      workspaceId,
+      conversationId,
+      role: "system",
+      authorName: "System",
+      content: `Auto-approved by ${by}, but it failed: ${description}. ${failureReason}`,
+    });
     rooms.broadcast(roomId, { type: "message", message });
     await db.recordAuditEvent({
       workspaceId,
@@ -555,7 +759,13 @@ async function runAutoApproved(input: {
       summary: `Auto-approved by ${by}, but “${description}” failed: ${failureReason}`,
       metadata: { actionId: action.id, toolName: input.toolName, ...sourceMetadata, failureReason },
     });
-    return { status: "failed", autoApproved: true, approvedBy: by, error: failureReason, note: "This action was auto-approved, but running it failed. Tell the user it did not happen and why." };
+    return {
+      status: "failed",
+      autoApproved: true,
+      approvedBy: by,
+      error: failureReason,
+      note: "This action was auto-approved, but running it failed. Tell the user it did not happen and why.",
+    };
   }
 }
 
@@ -576,12 +786,16 @@ export function recordReads(tools: ToolExecutor[], reads: ProposalContext["reads
       ...tool,
       execute: async (args: Record<string, unknown>) => {
         const result = await tool.execute(args);
-        const resultText = typeof result === "string" ? result : JSON.stringify(result) ?? "";
+        const resultText = typeof result === "string" ? result : (JSON.stringify(result) ?? "");
         const summary = Object.entries(args)
           .filter(([, value]) => value !== undefined && value !== null && value !== "" && typeof value !== "object")
           .map(([key, value]) => `${key}: ${String(value).slice(0, 80)}`)
           .join(", ");
-        reads.push({ tool: tool.definition.function.name, summary, excerpt: resultText.length > READ_EXCERPT ? `${resultText.slice(0, READ_EXCERPT)}…` : resultText });
+        reads.push({
+          tool: tool.definition.function.name,
+          summary,
+          excerpt: resultText.length > READ_EXCERPT ? `${resultText.slice(0, READ_EXCERPT)}…` : resultText,
+        });
         if (reads.length > MAX_READS_KEPT) reads.splice(0, reads.length - MAX_READS_KEPT);
         return result;
       },
@@ -615,7 +829,12 @@ async function announceExpired(rooms: RoomRegistry, action: PendingAction): Prom
     actorType: "system",
     actorName: "Approval rules",
     summary: `Expired after ${db.actionApprovalTtlHours()} hours without approval: ${action.description}`,
-    metadata: { actionId: action.id, toolName: action.toolName, approvals: action.approvals?.length ?? 0, requiredApprovals: action.requiredApprovals ?? 1 },
+    metadata: {
+      actionId: action.id,
+      toolName: action.toolName,
+      approvals: action.approvals?.length ?? 0,
+      requiredApprovals: action.requiredApprovals ?? 1,
+    },
   });
 }
 
@@ -627,11 +846,26 @@ export async function expireStaleActions(rooms: RoomRegistry): Promise<number> {
 }
 
 /** Records "approve similar actions for 7 days" after an approver confirmed one. */
-async function grantStandingApproval(workspaceId: string, action: PendingAction, approver: { userId: string; name: string }, rooms: RoomRegistry): Promise<StandingApproval | null> {
+async function grantStandingApproval(
+  workspaceId: string,
+  action: PendingAction,
+  approver: { userId: string; name: string },
+  rooms: RoomRegistry,
+): Promise<StandingApproval | null> {
   const target = action.target ?? describeActionTarget(action.toolName, action.args, action.agentKind);
   const { scope, label } = standingScope(target);
   const description = `${action.toolName.replace(/[_-]+/g, " ")} on ${label}`;
-  const approval = await db.createStandingApproval({ workspaceId, provider: target.provider, toolName: action.toolName, scope, scopeLabel: label, description, createdBy: approver, sourceActionId: action.id, days: STANDING_APPROVAL_DAYS });
+  const approval = await db.createStandingApproval({
+    workspaceId,
+    provider: target.provider,
+    toolName: action.toolName,
+    scope,
+    scopeLabel: label,
+    description,
+    createdBy: approver,
+    sourceActionId: action.id,
+    days: STANDING_APPROVAL_DAYS,
+  });
   const message = await db.insertMessage({
     workspaceId,
     conversationId: action.conversationId,
@@ -647,23 +881,37 @@ async function grantStandingApproval(workspaceId: string, action: PendingAction,
     actorUserId: approver.userId,
     actorName: approver.name,
     summary: `${approver.name} approved similar actions (${description}) for ${STANDING_APPROVAL_DAYS} days`,
-    metadata: { standingApprovalId: approval.id, sourceActionId: action.id, toolName: action.toolName, scope, expiresAt: approval.expiresAt },
+    metadata: {
+      standingApprovalId: approval.id,
+      sourceActionId: action.id,
+      toolName: action.toolName,
+      scope,
+      expiresAt: approval.expiresAt,
+    },
   });
   return approval;
 }
 
 /** Adds runAsAvailable: whether the member the action runs as still has a usable connection. */
-export async function withRunAsAvailability(workspaceId: string, deps: CreateServerDeps, actions: PendingAction[]): Promise<PendingAction[]> {
+export async function withRunAsAvailability(
+  workspaceId: string,
+  deps: CreateServerDeps,
+  actions: PendingAction[],
+): Promise<PendingAction[]> {
   if (!actions.some((action) => action.status === "pending")) return actions;
   const integrations = await db.listIntegrations(workspaceId);
-  const roles = new Map((await db.listWorkspaceMembersWithRoles(workspaceId)).map((member) => [member.id, member.role] as const));
+  const roles = new Map(
+    (await db.listWorkspaceMembersWithRoles(workspaceId)).map((member) => [member.id, member.role] as const),
+  );
   const policy = await db.getWorkspacePermissionPolicy(workspaceId);
   return actions.map((action) => {
     if (action.status !== "pending") return action;
     const provider = providerForTool(action.toolName, action.agentKind);
     const userId = action.runAsUserId ?? action.requestedByUserId;
     if (!userId) return { ...action, runAsAvailable: true };
-    const connected = integrations.some((integration) => integration.type === provider && integration.ownerUserId === userId);
+    const connected = integrations.some(
+      (integration) => integration.type === provider && integration.ownerUserId === userId,
+    );
     // Their role must still allow the tool (Admins hold every permission).
     const role = roles.get(userId);
     const permitted = role === "admin" || (role === "editor" && policy.editor[provider]);
@@ -682,9 +930,16 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
     if (!UUID_RE.test(workspaceId)) return res.status(400).json({ error: "invalid workspace id" });
     const conversationId = typeof req.query.conversationId === "string" ? req.query.conversationId : "";
     if (!UUID_RE.test(conversationId)) return res.status(400).json({ error: "valid conversationId is required" });
-    if (!(await db.getWorkspaceRole(workspaceId, req.user!.id))) return res.status(403).json({ error: "You do not have permission to perform this action." });
+    if (!(await db.getWorkspaceRole(workspaceId, req.user!.id)))
+      return res.status(403).json({ error: "You do not have permission to perform this action." });
     const onlyPending = req.query.status !== "all";
-    res.json(await withRunAsAvailability(workspaceId, deps, await db.listPendingActions(workspaceId, conversationId, onlyPending)));
+    res.json(
+      await withRunAsAvailability(
+        workspaceId,
+        deps,
+        await db.listPendingActions(workspaceId, conversationId, onlyPending),
+      ),
+    );
   });
 
   // Passing failures to next() (instead of `void`) sends them to the error
@@ -709,21 +964,31 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
     // twice -- two issues, two Slack posts. Only one request at a time may
     // resolve a given action, across every server process; the status is
     // re-read once the lock is held, so the second request sees the result.
-    const outcome = await db.tryWithAdvisoryLock(`pending-action:${actionId}`, () => resolveActionLocked(req, res, intent, workspaceId, actionId));
+    const outcome = await db.tryWithAdvisoryLock(`pending-action:${actionId}`, () =>
+      resolveActionLocked(req, res, intent, workspaceId, actionId),
+    );
     if (!outcome.acquired) {
       res.status(409).json({ error: "Someone is already confirming or cancelling this action." });
     }
   }
 
-  async function resolveActionLocked(req: Request, res: Response, intent: "confirmed" | "cancelled", workspaceId: string, actionId: string): Promise<void> {
+  async function resolveActionLocked(
+    req: Request,
+    res: Response,
+    intent: "confirmed" | "cancelled",
+    workspaceId: string,
+    actionId: string,
+  ): Promise<void> {
     const action = await db.getPendingAction(workspaceId, actionId);
     if (!action) {
       res.status(404).json({ error: "action not found" });
       return;
     }
     const role = await db.getWorkspaceRole(workspaceId, req.user!.id);
-    if (!role || !(await db.hasWorkspacePermission(workspaceId, role, "approveActions"))) {
-      res.status(403).json({ error: "Your workspace role does not have permission to approve or cancel write actions." });
+    if (!role || !(await db.hasWorkspacePermissionForUser(workspaceId, role, req.user!.id, "approveActions"))) {
+      res
+        .status(403)
+        .json({ error: "Your workspace role does not have permission to approve or cancel write actions." });
       return;
     }
     if (action.status !== "pending") {
@@ -732,14 +997,27 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
     }
     const actorName = req.user!.displayName;
     const roomId = `${workspaceId}:${action.conversationId}`;
-    const watchers = () => [req.user!.id, ...rooms.participants(roomId).flatMap((participant) => (participant.userId ? [participant.userId] : []))];
+    const watchers = () => [
+      req.user!.id,
+      ...rooms.participants(roomId).flatMap((participant) => (participant.userId ? [participant.userId] : [])),
+    ];
 
     // Approvals expire: an action nobody approved within the window is
     // cancelled rather than run long after the conversation moved on.
     if (intent === "confirmed" && action.expiresAt && Date.parse(action.expiresAt) <= Date.now()) {
-      const resolved = await db.resolvePendingAction({ workspaceId, id: actionId, status: "cancelled", result: `Expired: nobody approved it within ${db.actionApprovalTtlHours()} hours.` });
+      const resolved = await db.resolvePendingAction({
+        workspaceId,
+        id: actionId,
+        status: "cancelled",
+        result: `Expired: nobody approved it within ${db.actionApprovalTtlHours()} hours.`,
+      });
       if (resolved) await announceExpired(rooms, resolved);
-      res.status(409).json({ error: `This action expired after ${db.actionApprovalTtlHours()} hours without approval, so it was cancelled. Ask the agent again if it's still needed.`, code: "expired" });
+      res
+        .status(409)
+        .json({
+          error: `This action expired after ${db.actionApprovalTtlHours()} hours without approval, so it was cancelled. Ask the agent again if it's still needed.`,
+          code: "expired",
+        });
       return;
     }
     // Approval rules, checked again now: a rule added or tightened after the
@@ -751,11 +1029,26 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
     let ruleGoverned = Boolean(action.approvalRuleId);
     if (intent === "confirmed") {
       const target = action.target ?? describeActionTarget(action.toolName, action.args, action.agentKind);
-      const current = evaluateApprovalRules(await db.listApprovalRules(workspaceId), actionFacts(action.toolName, action.args, target), { allowAutoApprove: false });
+      const current = evaluateApprovalRules(
+        await db.listApprovalRules(workspaceId),
+        actionFacts(action.toolName, action.args, target),
+        { allowAutoApprove: false },
+      );
       if (current.effect === "block") {
-        const resolved = await db.resolvePendingAction({ workspaceId, id: actionId, status: "cancelled", result: `Blocked by approval rule “${current.ruleName}”.` });
+        const resolved = await db.resolvePendingAction({
+          workspaceId,
+          id: actionId,
+          status: "cancelled",
+          result: `Blocked by approval rule “${current.ruleName}”.`,
+        });
         rooms.broadcast(roomId, { type: "pending_action_update", action: resolved });
-        const message = await db.insertMessage({ workspaceId, conversationId: action.conversationId, role: "system", authorName: "System", content: `Blocked by approval rule “${current.ruleName}”: ${action.description}. ${actorName}'s approval was not used.` });
+        const message = await db.insertMessage({
+          workspaceId,
+          conversationId: action.conversationId,
+          role: "system",
+          authorName: "System",
+          content: `Blocked by approval rule “${current.ruleName}”: ${action.description}. ${actorName}'s approval was not used.`,
+        });
         rooms.broadcast(roomId, { type: "message", message });
         await db.recordAuditEvent({
           workspaceId,
@@ -766,7 +1059,12 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
           summary: `Approval rule “${current.ruleName}” blocked “${action.description}” when ${actorName} tried to confirm it`,
           metadata: { actionId, toolName: action.toolName, ruleId: current.ruleId, ruleName: current.ruleName },
         });
-        res.status(409).json({ error: `The approval rule “${current.ruleName}” blocks this action, so it was cancelled.`, code: "blocked_by_rule" });
+        res
+          .status(409)
+          .json({
+            error: `The approval rule “${current.ruleName}” blocks this action, so it was cancelled.`,
+            code: "blocked_by_rule",
+          });
         return;
       }
       if (current.effect === "require_approvals") {
@@ -781,18 +1079,34 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
     // "Also approve similar actions for 7 days" from the card.
     const remember = intent === "confirmed" && req.body?.remember === true;
     if (remember && (ruleGoverned || action.autoApproveAllowed === false)) {
-      res.status(400).json({ error: "Standing approvals aren't available for actions an approval rule governs, or for workflows that require approval.", code: "standing_not_allowed" });
+      res
+        .status(400)
+        .json({
+          error:
+            "Standing approvals aren't available for actions an approval rule governs, or for workflows that require approval.",
+          code: "standing_not_allowed",
+        });
       return;
     }
     if (intent === "confirmed" && ruleGoverned) {
       // Under a rule, approvals must come from people other than the requester.
       if (action.requestedByUserId && action.requestedByUserId === req.user!.id) {
-        res.status(403).json({ error: `The approval rule “${ruleName}” needs ${approvalsPhrase(requiredApprovals)} from people other than the person who asked for this action.`, code: "requester_cannot_approve" });
+        res
+          .status(403)
+          .json({
+            error: `The approval rule “${ruleName}” needs ${approvalsPhrase(requiredApprovals)} from people other than the person who asked for this action.`,
+            code: "requester_cannot_approve",
+          });
         return;
       }
       if (approvals.some((approval) => approval.userId === req.user!.id)) {
         const left = requiredApprovals - approvals.length;
-        res.status(409).json({ error: `You already approved this. It needs ${approvalsPhrase(Math.max(left, 1))} more from someone else.`, code: "already_approved" });
+        res
+          .status(409)
+          .json({
+            error: `You already approved this. It needs ${approvalsPhrase(Math.max(left, 1))} more from someone else.`,
+            code: "already_approved",
+          });
         return;
       }
       if (approvals.length + 1 < requiredApprovals) {
@@ -869,16 +1183,21 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
     // run it as themselves.
     const provider = providerForTool(action.toolName, action.agentKind);
     const runAsMe = req.body?.runAs === "me";
-    const runUserId = runAsMe ? req.user!.id : action.runAsUserId ?? action.requestedByUserId ?? req.user!.id;
+    const runUserId = runAsMe ? req.user!.id : (action.runAsUserId ?? action.requestedByUserId ?? req.user!.id);
     // The policy and the person must both allow it: whoever the action runs
     // as must still be a member whose role may use this tool. A requester who
     // was removed or lost the tool permission can't have a write run as them.
     const mayUseTool = async (userId: string) => {
       const memberRole = await db.getWorkspaceRole(workspaceId, userId);
-      return !!memberRole && (await db.hasWorkspacePermission(workspaceId, memberRole, provider));
+      return !!memberRole && (await db.hasWorkspacePermissionForUser(workspaceId, memberRole, userId, provider));
     };
     if (runAsMe && !(await mayUseTool(req.user!.id))) {
-      res.status(403).json({ error: `Your role can't use ${PROVIDER_LABELS[provider]} in this workspace, so you can't run this as yourself.`, code: "tool_not_permitted" });
+      res
+        .status(403)
+        .json({
+          error: `Your role can't use ${PROVIDER_LABELS[provider]} in this workspace, so you can't run this as yourself.`,
+          code: "tool_not_permitted",
+        });
       return;
     }
     const runnerAllowed = runAsMe || (await mayUseTool(runUserId));
@@ -892,9 +1211,16 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
       if (provider !== "github" || !action.target?.repo) return false;
       const context = tools.githubContext;
       if (!context) return true;
-      return `${context.owner}/${context.repo}`.toLowerCase() !== action.target.repo.toLowerCase() || context.access === "none" || context.access === "read";
+      return (
+        `${context.owner}/${context.repo}`.toLowerCase() !== action.target.repo.toLowerCase() ||
+        context.access === "none" ||
+        context.access === "read"
+      );
     };
-    const tool = !runnerAllowed || repoBlocked(built) ? undefined : built.tools.find((t) => t.definition.function.name === action.toolName);
+    const tool =
+      !runnerAllowed || repoBlocked(built)
+        ? undefined
+        : built.tools.find((t) => t.definition.function.name === action.toolName);
     if (!tool) {
       // Offer "Run as me" instead of failing when the approver's own
       // connection can do it and their role may use the tool. The action
@@ -902,7 +1228,9 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
       if (!runAsMe && runUserId !== req.user!.id && (await mayUseTool(req.user!.id))) {
         const mine = await buildToolsForWorkspace(workspaceId, deps, req.user!.id);
         if (!repoBlocked(mine) && mine.tools.some((t) => t.definition.function.name === action.toolName)) {
-          const why = runnerAllowed ? `${runnerName}'s ${PROVIDER_LABELS[provider]} connection can no longer run this action` : `${runnerName} can no longer use ${PROVIDER_LABELS[provider]} in this workspace`;
+          const why = runnerAllowed
+            ? `${runnerName}'s ${PROVIDER_LABELS[provider]} connection can no longer run this action`
+            : `${runnerName} can no longer use ${PROVIDER_LABELS[provider]} in this workspace`;
           res.status(409).json({
             error: `${why}. You can run it as yourself${formatAccount(provider, mine.accounts[provider]?.account) ? ` (${formatAccount(provider, mine.accounts[provider]?.account)})` : ""} instead.`,
             code: "run_as_unavailable",
@@ -911,8 +1239,12 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
           return;
         }
       }
-      const reason = runnerAllowed ? "the integration this action needed is no longer connected" : `${runnerName} no longer has permission to use ${PROVIDER_LABELS[provider]} in this workspace`;
-      console.error(`[actions] workspace ${workspaceId}: confirm failed for action ${actionId} (${action.toolName}) -- ${reason}`);
+      const reason = runnerAllowed
+        ? "the integration this action needed is no longer connected"
+        : `${runnerName} no longer has permission to use ${PROVIDER_LABELS[provider]} in this workspace`;
+      console.error(
+        `[actions] workspace ${workspaceId}: confirm failed for action ${actionId} (${action.toolName}) -- ${reason}`,
+      );
       const resolved = await db.resolvePendingAction({
         workspaceId,
         id: actionId,
@@ -941,32 +1273,48 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
         summary: `${actorName} tried to confirm "${action.description}", but it failed: ${reason}`,
         metadata: { actionId, toolName: action.toolName },
       });
-      res.status(409).json({ error: runnerAllowed ? "integration no longer connected" : `${reason}.`, code: runnerAllowed ? "integration_unavailable" : "tool_not_permitted" });
+      res
+        .status(409)
+        .json({
+          error: runnerAllowed ? "integration no longer connected" : `${reason}.`,
+          code: runnerAllowed ? "integration_unavailable" : "tool_not_permitted",
+        });
       return;
     }
 
     const executed = built.accounts[provider];
     const executedAccount = formatAccount(provider, executed?.account);
-    const executedAsName = runAsMe ? actorName : action.runAsName ?? action.requestedByName ?? actorName;
+    const executedAsName = runAsMe ? actorName : (action.runAsName ?? action.requestedByName ?? actorName);
     // The approval that completes the set is recorded only once the action
     // actually runs, so a "Run as me" retry isn't refused as a repeat.
     if (ruleGoverned) await db.recordActionApproval(actionId, { userId: req.user!.id, name: actorName });
-    const approvedBy = ruleGoverned ? [...approvals.map((approval) => approval.name), actorName].join(" and ") : actorName;
+    const approvedBy = ruleGoverned
+      ? [...approvals.map((approval) => approval.name), actorName].join(" and ")
+      : actorName;
     try {
       const result = await tool.execute(action.args);
       const resultText = typeof result === "string" ? result : JSON.stringify(result);
       await db.setActionExecutedAs(workspaceId, actionId, runUserId ?? null, executed?.account ?? null);
-      const resolved = await db.resolvePendingAction({ workspaceId, id: actionId, status: "confirmed", result: resultText });
+      const resolved = await db.resolvePendingAction({
+        workspaceId,
+        id: actionId,
+        status: "confirmed",
+        result: resultText,
+      });
       rooms.broadcast(roomId, { type: "pending_action_update", action: resolved });
       const ranAs = runAsMe
         ? ` It ran as ${actorName}${executedAccount ? ` (${executedAccount})` : ""} because ${action.runAsName ?? action.requestedByName ?? "the requester"}'s connection was unavailable.`
-        : executedAccount ? ` Ran as ${executedAsName} (${executedAccount}).` : "";
+        : executedAccount
+          ? ` Ran as ${executedAsName} (${executedAccount}).`
+          : "";
       const message = await db.insertMessage({
         workspaceId,
         conversationId: action.conversationId,
         role: "system",
         authorName: "System",
-        content: ruleGoverned ? `Approved by ${approvedBy} under rule “${ruleName}”: ${action.description}.${ranAs}` : `${actorName} confirmed: ${action.description}.${ranAs}`,
+        content: ruleGoverned
+          ? `Approved by ${approvedBy} under rule “${ruleName}”: ${action.description}.${ranAs}`
+          : `${actorName} confirmed: ${action.description}.${ranAs}`,
       });
       rooms.broadcast(roomId, { type: "message", message });
       // A click acknowledgement only proves someone approved the action;
@@ -980,7 +1328,14 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
         role: "agent",
         authorName: completionAgentFor(action.agentKind, action.toolName),
         content: `The requested action has completed: ${action.description}.`,
-        provenance: { provider, via: "user", actedAsUserId: runUserId ?? null, actedAsName: executedAsName, account: executed?.account ?? null, ...(action.target?.repo ? { repos: [action.target.repo] } : {}) },
+        provenance: {
+          provider,
+          via: "user",
+          actedAsUserId: runUserId ?? null,
+          actedAsName: executedAsName,
+          account: executed?.account ?? null,
+          ...(action.target?.repo ? { repos: [action.target.repo] } : {}),
+        },
       });
       rooms.broadcast(roomId, { type: "message", message: completionMessage });
       // Members who are not watching this conversation learn the write
@@ -1004,9 +1359,27 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
         actorUserId: req.user?.id ?? null,
         actorName,
         summary: `${actorName} confirmed: ${action.description}`,
-        metadata: { actionId, toolName: action.toolName, provider, target: action.target?.label ?? null, repo: action.target?.repo ?? null, executedAs: executedAccount ?? executedAsName, activity, url, ...(ruleGoverned ? { ruleName, approvedBy, requiredApprovals } : {}) },
+        metadata: {
+          actionId,
+          toolName: action.toolName,
+          provider,
+          target: action.target?.label ?? null,
+          repo: action.target?.repo ?? null,
+          executedAs: executedAccount ?? executedAsName,
+          activity,
+          url,
+          ...(ruleGoverned ? { ruleName, approvedBy, requiredApprovals } : {}),
+        },
       });
-      const teamActivity: TeamActivity = { id: event.id, source: "nexus", actorName, summary: activity, repo: action.target?.repo ?? null, url, createdAt: event.createdAt };
+      const teamActivity: TeamActivity = {
+        id: event.id,
+        source: "nexus",
+        actorName,
+        summary: activity,
+        repo: action.target?.repo ?? null,
+        url,
+        createdAt: event.createdAt,
+      };
       rooms.broadcast(workspaceId, { type: "team_activity", activity: teamActivity });
       if (remember) await grantStandingApproval(workspaceId, action, { userId: req.user!.id, name: actorName }, rooms);
       res.json(resolved);
@@ -1015,9 +1388,17 @@ export function registerActionRoutes(app: Express, deps: CreateServerDeps, rooms
       // stale token, GitHub rejecting the write) resolves the action to
       // "failed", posts why in the room, and records it.
       const failureReason = errMessage(err);
-      console.error(`[actions] workspace ${workspaceId}: confirm failed for action ${actionId} (${action.toolName}):`, failureReason);
+      console.error(
+        `[actions] workspace ${workspaceId}: confirm failed for action ${actionId} (${action.toolName}):`,
+        failureReason,
+      );
       captureError(err, { where: "action-confirm", workspaceId, actionId, toolName: action.toolName });
-      const resolved = await db.resolvePendingAction({ workspaceId, id: actionId, status: "failed", result: failureReason });
+      const resolved = await db.resolvePendingAction({
+        workspaceId,
+        id: actionId,
+        status: "failed",
+        result: failureReason,
+      });
       rooms.broadcast(roomId, { type: "pending_action_update", action: resolved });
       const failureMessage = await db.insertMessage({
         workspaceId,
