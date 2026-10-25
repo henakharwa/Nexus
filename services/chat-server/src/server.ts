@@ -12,6 +12,7 @@ import { replyForResolvedActions, stripConfirmationBoilerplate, type AgentKind }
 import { resolveLlmConfig } from "./llm-client.js";
 import { buildToolsForWorkspace, wrapForProposal, registerActionRoutes, expireStaleActions } from "./actions.js";
 import { channelMentions } from "./slack-channels.js";
+import { describeRulesForAgent } from "./approval-rules.js";
 import { registerGithubTeamRoutes, registerGithubWebhookRoutes, type GithubEventHandler } from "./routes/github-team.js";
 import { formatTeamActivity, listTeamActivity, summarizeGithubEvent } from "./github-team.js";
 import type { MessageProvenance, TeamActivity } from "@mai-chat/shared-types";
@@ -353,6 +354,9 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     // channel list now, so the agent uses the exact channel instead of
     // searching for it (and never substitutes another one).
     const slackChannels = agentKind === "slack" ? await describeSlackChannelMentions(messages, built.findSlackChannels) : null;
+    // The rules that can apply to this agent's writes, so it doesn't propose
+    // what a rule will block. Read-only turns can't write, so they skip it.
+    const approvalRules = agentKind !== "project" && !workflowReadOnly ? describeRulesForAgent(await db.listApprovalRules(workspaceId), agentKind) : null;
     // What teammates and GitHub did recently, so the GitHub agent can point
     // out work that is already done or under way.
     const teamActivity = agentKind === "github" ? formatTeamActivity(await listTeamActivity(workspaceId, { hours: 24, limit: 8 }).catch(() => [])) : null;
@@ -375,6 +379,7 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       teamActivity,
       actionContext: recentActions || null,
       slackChannels,
+      approvalRules,
       agentKind,
       customInstructions: activeInstructions || undefined,
       knowledge: configuredAgent?.knowledge,

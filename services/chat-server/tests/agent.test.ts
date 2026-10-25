@@ -564,3 +564,35 @@ describe("finding Slack channels by name", () => {
     expect(systemPrompt).toContain("Never post to a channel other than the one the person named");
   });
 });
+
+describe("approval rules in the agent's instructions", () => {
+  async function promptFor(agentKind: "github" | "project", approvalRules: string | null) {
+    let systemPrompt = "";
+    const chat: LlmChatFn = async (_config, messages) => {
+      systemPrompt = String(messages[0].content);
+      return { role: "assistant", content: "ok" };
+    };
+    await runAgentTurn({
+      history: [{ role: "user", content: "Merge PR #4" }],
+      tools: [],
+      agentKind,
+      approvalRules,
+      chat,
+      llmConfig: { baseUrl: "http://example.invalid", apiKey: "k", model: "m", maxTokens: 10, tpmLimit: 8000 },
+    });
+    return systemPrompt;
+  }
+  const rules = '- "Production merges": GitHub: merge on main needs 2 approvals from people other than the requester.';
+
+  it("tells a tool agent the rules and how to act on them", async () => {
+    const prompt = await promptFor("github", rules);
+    expect(prompt).toContain(rules);
+    expect(prompt).toContain("do not propose it: tell the person which rule prevents it");
+    expect(prompt).toContain("assume the stricter rule applies");
+  });
+
+  it("leaves them out when there are none, and for the Project agent, which can't write", async () => {
+    expect(await promptFor("github", null)).not.toContain("Workspace approval rules");
+    expect(await promptFor("project", rules)).not.toContain("Workspace approval rules");
+  });
+});

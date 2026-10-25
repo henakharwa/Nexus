@@ -33,6 +33,12 @@ export interface RunAgentTurnInput {
    * the exact channel instead of searching for it (see slack-channels.ts).
    */
   slackChannels?: string | null;
+  /**
+   * The workspace's approval rules that apply to this agent's tool, one per
+   * line (approval-rules.ts's describeRulesForAgent), so it doesn't propose
+   * what a rule will block. The server still enforces every rule.
+   */
+  approvalRules?: string | null;
   agentKind?: AgentKind;
   customInstructions?: string;
   knowledge?: string;
@@ -113,7 +119,8 @@ function buildSystemPrompt(
   workflowMode = false,
   githubNotice?: string | null,
   teamActivity?: string | null,
-  slackChannels?: string | null
+  slackChannels?: string | null,
+  approvalRules?: string | null
 ): string {
   const specialist = agentKind === "github"
     ? "You are the GitHub specialist. Focus on repository code, issues, pull requests, branches, and CI. Only use the GitHub tools supplied for this turn."
@@ -147,7 +154,11 @@ rather than guessing.
 
 ${githubSection}
 
-${slackChannels && agentKind === "slack" ? `Slack channels named in this request, looked up by Nexus in the member's channel list (trusted, server-generated):
+${approvalRules && agentKind !== "project" ? `Workspace approval rules for your write actions (trusted, set by this workspace's Admins; the strictest matching rule wins):
+${approvalRules}
+Before proposing a write, check it against these rules. If a "blocked" rule covers it, do not propose it: tell the person which rule prevents it and that an Admin can change rules on the Approvals page. If a rule needs approvals, say how many and that they must come from people other than the person who asked. A write that a "runs without approval" rule covers happens as soon as you call the tool, so only call it when the person clearly asked for that change. When you can't tell whether a rule covers an action (for example, which branch it lands on), assume the stricter rule applies.
+
+` : ""}${slackChannels && agentKind === "slack" ? `Slack channels named in this request, looked up by Nexus in the member's channel list (trusted, server-generated):
 ${slackChannels}
 Use these channel IDs exactly. For a channel marked "not found", tell the person it wasn't found and ask; never use a different channel instead.
 
@@ -393,7 +404,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<RunAgentTu
   // against an 8000 limit, almost entirely from tool schema + system
   // prompt + the (then 4096) completion reserve, with nothing left over
   // for history at all.
-  const systemPrompt = buildSystemPrompt(input.githubContext, input.agentKind, input.actionContext, input.customInstructions, input.knowledge, input.workspaceMemory, input.workflowMode, input.githubNotice, input.teamActivity, input.slackChannels);
+  const systemPrompt = buildSystemPrompt(input.githubContext, input.agentKind, input.actionContext, input.customInstructions, input.knowledge, input.workspaceMemory, input.workflowMode, input.githubNotice, input.teamActivity, input.slackChannels, input.approvalRules);
   const toolsTokens = estimateTokens(JSON.stringify(toolDefs));
   const systemTokens = estimateTokens(systemPrompt);
   const historyBudget = config.tpmLimit - toolsTokens - systemTokens - config.maxTokens - TOKEN_BUDGET_SAFETY_MARGIN;
