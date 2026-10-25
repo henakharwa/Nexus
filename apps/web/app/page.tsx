@@ -25,6 +25,7 @@ export default function HomePage() {
   const [joinCode, setJoinCode] = useState("");
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [joinRequestPending, setJoinRequestPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [existingWorkspace, setExistingWorkspace] = useState<Workspace | null>(null);
   const [myWorkspaces, setMyWorkspaces] = useState<WorkspaceMembership[]>([]);
@@ -133,6 +134,10 @@ export default function HomePage() {
     setError(null);
     try {
       const joined = workspace.joinCode ? await joinWorkspaceByCode(workspace.joinCode) : workspace;
+      if ("pending" in joined) {
+        setError("Your request to join is pending an Admin's approval.");
+        return;
+      }
       router.push(`/w/${joined.id}`);
     } catch (err) {
       setError(describeError(err, "Something went wrong. Try again."));
@@ -148,8 +153,14 @@ export default function HomePage() {
     }
     setJoining(true);
     setError(null);
+    setJoinRequestPending(false);
     try {
       const workspace = await joinWorkspaceByCode(joinCode.trim());
+      if ("pending" in workspace) {
+        setJoinRequestPending(true);
+        setJoining(false);
+        return;
+      }
       router.push(`/w/${workspace.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -435,6 +446,11 @@ export default function HomePage() {
                   {joining ? "Joining…" : "Join workspace"}
                 </button>
               </form>
+              {joinRequestPending && (
+                <p className="panel-hint" role="status">
+                  Your request is pending an Admin&apos;s approval. You can return once it has been approved.
+                </p>
+              )}
             </div>
           )}
         </div>

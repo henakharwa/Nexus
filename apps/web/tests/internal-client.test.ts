@@ -1,6 +1,6 @@
 // Internal tests for the web client's error messages and API URL selection.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, describeError } from "../lib/api";
+import { ApiError, describeError, joinWorkspaceByCode } from "../lib/api";
 
 describe("WEB-01 describeError", () => {
   it("basic: shows the server's own message when it is specific", () => {
@@ -52,5 +52,14 @@ describe("WEB-02 chat server URL", () => {
     const config = await import("../lib/config");
     expect(config.CHAT_SERVER_URL).toBe("https://nexus.example.test/api");
     expect(config.CHAT_SERVER_WS_URL).toBe("wss://nexus.example.test/api");
+  });
+});
+
+describe("WEB-03 join-code requests", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("returns the pending result instead of pretending it is a workspace", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ pending: true }), { status: 202 })));
+    await expect(joinWorkspaceByCode("bright-otter-42")).resolves.toEqual({ pending: true });
   });
 });

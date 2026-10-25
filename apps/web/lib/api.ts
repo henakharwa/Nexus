@@ -97,11 +97,13 @@ export async function getWorkspaceByJoinCode(joinCode: string): Promise<Workspac
   return (await parseJsonOrThrow(res)) as Workspace;
 }
 
-export async function joinWorkspaceByCode(joinCode: string): Promise<Workspace> {
+export type JoinWorkspaceByCodeResult = Workspace | { pending: true };
+
+export async function joinWorkspaceByCode(joinCode: string): Promise<JoinWorkspaceByCodeResult> {
   const res = await authenticatedFetch(`${CHAT_SERVER_URL}/workspaces/by-code/${encodeURIComponent(joinCode)}/join`, {
     method: "POST",
   });
-  return (await parseJsonOrThrow(res)) as Workspace;
+  return (await parseJsonOrThrow(res)) as JoinWorkspaceByCodeResult;
 }
 
 export async function getWorkspace(id: string): Promise<Workspace> {
