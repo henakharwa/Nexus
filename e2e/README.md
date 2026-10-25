@@ -8,6 +8,7 @@ End-to-end tests that drive the real app in Chromium with [Playwright](https://p
 | `chat.spec.ts` | Two teammates in one workspace: presence, shared messages, the agent's reply, hand-offs, the message length limit |
 | `approvals.spec.ts` | Approval cards for everyone in the room, Editors unable to approve, cancelling, and a confirm that fails visibly |
 | `approval-rules.spec.ts` | An Admin creates a two-approver rule on the Approvals page; Editors can see but not change it; the requester can't approve; two other people approve in turn; the recommended rules in one click, with the small-team warning |
+| `change-preview.spec.ts` | An approval card shows a line diff, full text with nothing cut off, and why the agent proposed it, including content it read from outside Nexus |
 | `workflows.spec.ts` | Creating a workflow through the builder and running it |
 | `integrations.spec.ts` | GitHub's per-member repository setup and GitHub events panel on the Integrations page |
 

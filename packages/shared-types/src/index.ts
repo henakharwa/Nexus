@@ -693,6 +693,48 @@ export interface PendingAction {
   autoApproveAllowed?: boolean;
   // When the action stops waiting and is cancelled (ACTION_APPROVAL_TTL_HOURS, 24 by default).
   expiresAt?: string;
+  // Exactly what will change, built when the action was proposed
+  // (services/chat-server/src/change-preview.ts): a diff for file changes,
+  // full text for messages and comments, from -> to for updates.
+  changePreview?: ChangePreview | null;
+  // Why the agent proposed it: the request that started the turn and what
+  // the agent read just before, so approvers can spot an action that came
+  // from text inside an issue or message rather than from a person.
+  proposalContext?: ProposalContext | null;
+}
+
+export interface DiffLine {
+  type: "context" | "add" | "del" | "gap";
+  text: string;
+  oldLine?: number;
+  newLine?: number;
+}
+
+export interface ChangePreviewSection {
+  // e.g. "README.md on main", "Comment on #18", "src/app.ts (modified, +3 -1)"
+  title: string;
+  kind: "diff" | "text" | "fields";
+  lines?: DiffLine[];
+  text?: string;
+  // "from" is absent when the old value isn't known (or there is none).
+  fields?: Array<{ label: string; from?: string | null; to: string }>;
+  // e.g. "New file", "Showing the first 400 changed lines"
+  note?: string;
+}
+
+export interface ChangePreview {
+  sections: ChangePreviewSection[];
+}
+
+export interface ProposalContext {
+  // The chat message (or workflow task) that started the agent turn.
+  request: string | null;
+  requestedBy: string | null;
+  // "chat" or the workflow's name.
+  source: string;
+  // The agent's read calls in that turn just before it proposed this,
+  // newest last. Their content was written outside Nexus.
+  reads: Array<{ tool: string; summary: string; excerpt: string }>;
 }
 
 // An approver's "approve this kind of action for this target" from an

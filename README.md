@@ -488,6 +488,26 @@ on pull requests into `main`. When the agent proposes a direct file change
 on a protected branch, it suggests a pull request instead. Nexus approval
 comes first, then GitHub's branch protection.
 
+**Every card shows exactly what will change.** Built when the action is
+proposed (`services/chat-server/src/change-preview.ts`):
+
+- **GitHub file change:** a line diff of the current file against the
+  proposed content, with line numbers and surrounding context.
+- **Pull request or merge:** the title, which branch merges into which, and
+  each changed file's diff.
+- **Issue update:** each field from → to.
+- **Comment, issue or Slack message:** the full text.
+- **Anything else:** every argument in full.
+
+Nothing is cut off silently. Text over 20,000 characters ends with a note
+saying how much more there is.
+
+Each card also has **Why the agent proposed this**: the request (or workflow
+task) that started the agent's turn, and the last few things the agent read
+just before. That content was written outside Nexus, so the card says so. If
+an action follows instructions found in an issue or a message rather than in
+the request, that's the place to spot it.
+
 Rule changes, blocked, expired and auto-approved actions, standing
 approvals and each individual approval are all logged in Activity. Rules live in the `approval_rules`
 table, individual approvals in `pending_action_approvals`, and standing

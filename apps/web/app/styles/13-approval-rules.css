@@ -283,6 +283,206 @@
   color: var(--text-dim);
 }
 
+/* Exact change preview on approval cards (ChangePreviewView.tsx). Cards
+   now carry diffs, so the approval panel above the composer gets more room
+   (it was min(280px, 34vh)), and the boxes inside it scroll on their own. */
+.pending-actions-list {
+  max-height: min(560px, 58vh);
+}
+
+.change-preview {
+  margin: 0 0 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.change-preview-label {
+  margin-bottom: 6px;
+  color: var(--text-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.change-section + .change-section {
+  margin-top: 10px;
+}
+
+.change-section h4 {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.change-note {
+  margin: 0 0 6px;
+  color: var(--warn-strong);
+  font-size: 12px;
+}
+
+.change-diff {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.change-diff-line {
+  display: grid;
+  grid-template-columns: 3.2em 3.2em 1.4em minmax(0, 1fr);
+  white-space: pre;
+}
+
+.change-diff-line.add {
+  background: var(--success-soft);
+}
+
+.change-diff-line.del {
+  background: var(--danger-soft);
+}
+
+.change-diff-num {
+  padding-right: 6px;
+  color: var(--text-faint);
+  text-align: right;
+  user-select: none;
+}
+
+.change-diff-sign {
+  color: var(--text-dim);
+  text-align: center;
+  user-select: none;
+}
+
+.change-diff-line.add .change-diff-sign {
+  color: var(--success-strong);
+}
+
+.change-diff-line.del .change-diff-sign {
+  color: var(--danger-strong);
+}
+
+.change-diff-line code {
+  font: inherit;
+  white-space: pre;
+}
+
+.change-diff-gap {
+  padding: 2px 8px;
+  background: var(--bg-subtle);
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.change-text {
+  max-height: 220px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.change-fields {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.change-fields div {
+  display: grid;
+  grid-template-columns: minmax(90px, max-content) minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.change-fields dt {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.change-fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.change-from del {
+  color: var(--danger-strong);
+}
+
+.change-to {
+  color: var(--text);
+}
+
+.change-same {
+  color: var(--text-faint);
+}
+
+.proposal-context {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+}
+
+.proposal-context summary {
+  cursor: pointer;
+  color: var(--text-ink);
+  font-weight: 650;
+}
+
+.proposal-context summary span {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.proposal-context-body {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.proposal-context-heading {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.proposal-context-warning {
+  margin: 0;
+  color: var(--warn-strong);
+  font-size: 12px;
+}
+
+.proposal-context-reads {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.proposal-context-reads .change-text {
+  max-height: 160px;
+  margin-top: 4px;
+}
+
 @media (max-width: 860px) {
   .approval-rules-explainer,
   .approval-effect-options {

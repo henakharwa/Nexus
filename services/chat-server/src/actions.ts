@@ -10,10 +10,11 @@ import { listMcpToolExecutors } from "./mcp-tools.js";
 import { buildNotionTools } from "./notion-tools.js";
 import { buildFigmaTools } from "./figma-tools.js";
 import type { IntegrationType, PendingAction, TeamActivity } from "@mai-chat/shared-types";
-import { offlineGithubTeamApi, type GithubTeamApi, type RepoAccess } from "./github-api.js";
+import { offlineGithubTeamApi, type GithubChangedFile, type GithubTeamApi, type RepoAccess } from "./github-api.js";
 import { describeActionTarget, findActionWarnings, guardGithubTools, providerForTool, type GithubWorkspaceContext } from "./github-team.js";
 import { actionFacts, evaluateApprovalRules, isSlackId, standingScope } from "./approval-rules.js";
-import type { ActionTarget, StandingApproval } from "@mai-chat/shared-types";
+import type { ActionTarget, ChangePreview, ProposalContext, StandingApproval } from "@mai-chat/shared-types";
+import { buildChangePreview, fullText } from "./change-preview.js";
 
 type ActionAgentKind = "project" | "github" | "slack" | "linear" | "notion" | "figma";
 
@@ -74,6 +75,11 @@ export interface GithubLookups {
   pullRequestBase(owner: string, repo: string, number: number): Promise<string | null>;
   defaultBranch(owner: string, repo: string): Promise<string | null>;
   branchProtection(owner: string, repo: string, branch: string): Promise<{ protected: boolean; requiredReviews: number | null } | null>;
+  // For change previews (change-preview.ts). Optional so tests can omit them.
+  fileText?(owner: string, repo: string, path: string, ref: string | null): Promise<{ exists: true; text: string } | { exists: false } | null>;
+  pullRequest?(owner: string, repo: string, number: number): Promise<{ title: string; body: string; head: string; base: string; state: string } | null>;
+  changedFiles?(owner: string, repo: string, which: { pullNumber: number } | { base: string; head: string }): Promise<GithubChangedFile[] | null>;
+  issue?(owner: string, repo: string, number: number): Promise<{ title: string; body: string; state: string; labels: string[] } | null>;
 }
 
 export interface BuildToolsOptions {
@@ -129,6 +135,10 @@ export async function buildToolsForWorkspace(workspaceId: string, deps: CreateSe
         pullRequestBase: async (lookupOwner, lookupRepo, number) => (api.getPullRequestBase ? api.getPullRequestBase(token, lookupOwner, lookupRepo, number) : null),
         defaultBranch: async (lookupOwner, lookupRepo) => (api.getDefaultBranch ? api.getDefaultBranch(token, lookupOwner, lookupRepo) : null),
         branchProtection: async (lookupOwner, lookupRepo, branch) => (api.getBranchProtection ? api.getBranchProtection(token, lookupOwner, lookupRepo, branch) : null),
+        fileText: async (lookupOwner, lookupRepo, path, ref) => (api.getFileText ? api.getFileText(token, lookupOwner, lookupRepo, path, ref) : null),
+        pullRequest: async (lookupOwner, lookupRepo, number) => (api.getPullRequest ? api.getPullRequest(token, lookupOwner, lookupRepo, number) : null),
+        changedFiles: async (lookupOwner, lookupRepo, which) => (api.listChangedFiles ? api.listChangedFiles(token, lookupOwner, lookupRepo, which) : null),
+        issue: async (lookupOwner, lookupRepo, number) => (api.getIssue ? api.getIssue(token, lookupOwner, lookupRepo, number) : null),
       };
     } catch (err) {
       // A misconfigured/unreachable GitHub MCP server (e.g. Docker isn't
@@ -251,6 +261,9 @@ export function wrapForProposal(
     // Lookups that make approval rules more precise (see enrichTarget).
     githubLookups?: GithubLookups;
     slackChannelName?: WorkspaceTools["slackChannelName"];
+    // Why the agent is proposing this: the request and its recent reads
+    // (see recordReads), captured at the moment of the proposal.
+    proposalContext?: () => ProposalContext | null;
   }
 ): ToolExecutor[] {
   // An automation review must never be able to turn an unexpected model
@@ -269,6 +282,9 @@ export function wrapForProposal(
         const description = tool.describe ? tool.describe(args) : `Run ${toolName}`;
         const preview = tool.preview ? tool.preview(args) : undefined;
         const target = await enrichTarget(toolName, args, describeActionTarget(toolName, args, agentKind), options);
+        // Exactly what will change, and why it was proposed, for the card.
+        const changePreview = await buildChangePreview(toolName, args, target, options?.githubLookups);
+        const proposalContext = options?.proposalContext?.() ?? null;
         // Approval rules decide first: a blocked action is never queued, and
         // an auto-approved one runs now. Loading the rules is not wrapped in
         // a catch on purpose -- if they can't be read, the proposal fails
@@ -305,13 +321,13 @@ export function wrapForProposal(
         const runAs = options?.runAs;
         const autoApproveAllowed = options?.allowAutoApprove !== false;
         if (decision.effect === "auto_approve") {
-          return runAutoApproved({ tool, args, workspaceId, conversationId, rooms, requestedBy, agentKind, runAs, toolName, description, preview, target, warnings, source: { kind: "rule", ruleId: decision.ruleId!, ruleName: decision.ruleName! } });
+          return runAutoApproved({ tool, args, workspaceId, conversationId, rooms, requestedBy, agentKind, runAs, toolName, description, preview, target, warnings, changePreview, proposalContext, source: { kind: "rule", ruleId: decision.ruleId!, ruleName: decision.ruleName! } });
         }
         // A standing approval applies only where no rule asks for more than
         // a normal approval card, and never to a "Requires approval" workflow.
         if (decision.effect === "default" && autoApproveAllowed) {
           const standing = await db.findStandingApproval(workspaceId, target.provider, toolName, standingScope(target).scope);
-          if (standing) return runAutoApproved({ tool, args, workspaceId, conversationId, rooms, requestedBy, agentKind, runAs, toolName, description, preview, target, warnings, source: { kind: "standing", approval: standing } });
+          if (standing) return runAutoApproved({ tool, args, workspaceId, conversationId, rooms, requestedBy, agentKind, runAs, toolName, description, preview, target, warnings, changePreview, proposalContext, source: { kind: "standing", approval: standing } });
         }
         const ruleNeedsApprovals = decision.effect === "require_approvals";
         const action = await db.createPendingAction({
@@ -332,6 +348,8 @@ export function wrapForProposal(
           approvalRuleId: decision.ruleId,
           approvalRuleName: decision.ruleName,
           autoApproveAllowed,
+          changePreview,
+          proposalContext,
         });
         rooms.broadcast(roomId, { type: "pending_action", action: { ...action, runAsAvailable: true } });
         await db.notifyWorkspaceMembers({
@@ -455,6 +473,8 @@ async function runAutoApproved(input: {
   preview?: string;
   target: ActionTarget;
   warnings: ReturnType<typeof findActionWarnings>;
+  changePreview?: ChangePreview | null;
+  proposalContext?: ProposalContext | null;
   source: AutoApprovalSource;
 }): Promise<unknown> {
   const { workspaceId, conversationId, rooms, requestedBy, description, source } = input;
@@ -481,6 +501,8 @@ async function runAutoApproved(input: {
     approvalRuleId: source.kind === "rule" ? source.ruleId : null,
     approvalRuleName: source.kind === "rule" ? source.ruleName : `Standing approval from ${source.approval.createdByName}`,
     autoApproved: true,
+    changePreview: input.changePreview ?? null,
+    proposalContext: input.proposalContext ?? null,
   });
   const account = formatAccount(provider, input.runAs?.account);
   const asName = requestedBy?.name ?? "the requester";
@@ -535,6 +557,41 @@ async function runAutoApproved(input: {
     });
     return { status: "failed", autoApproved: true, approvedBy: by, error: failureReason, note: "This action was auto-approved, but running it failed. Tell the user it did not happen and why." };
   }
+}
+
+const MAX_READS_KEPT = 6;
+const READ_EXCERPT = 1_500;
+
+/**
+ * Wraps the agent's read tools so each call is noted in `reads`: which tool,
+ * with what, and the start of what it returned. Proposals take the last few
+ * as their "why" (ProposalContext), so an approver can see when an action
+ * came from text the agent read -- an issue, a message -- rather than from a
+ * person. Write tools pass through untouched.
+ */
+export function recordReads(tools: ToolExecutor[], reads: ProposalContext["reads"]): ToolExecutor[] {
+  return tools.map((tool) => {
+    if (tool.mutates) return tool;
+    return {
+      ...tool,
+      execute: async (args: Record<string, unknown>) => {
+        const result = await tool.execute(args);
+        const resultText = typeof result === "string" ? result : JSON.stringify(result) ?? "";
+        const summary = Object.entries(args)
+          .filter(([, value]) => value !== undefined && value !== null && value !== "" && typeof value !== "object")
+          .map(([key, value]) => `${key}: ${String(value).slice(0, 80)}`)
+          .join(", ");
+        reads.push({ tool: tool.definition.function.name, summary, excerpt: resultText.length > READ_EXCERPT ? `${resultText.slice(0, READ_EXCERPT)}…` : resultText });
+        if (reads.length > MAX_READS_KEPT) reads.splice(0, reads.length - MAX_READS_KEPT);
+        return result;
+      },
+    };
+  });
+}
+
+/** The request, as stored with a proposal: the full text, capped visibly. */
+export function proposalRequest(text: string | null | undefined): string | null {
+  return text ? fullText(text) : null;
 }
 
 /** How long a standing approval from an approval card lasts. */

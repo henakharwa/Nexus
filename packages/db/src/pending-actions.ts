@@ -1,5 +1,7 @@
 // Agent-proposed actions awaiting approval.
 import type {
+  ChangePreview,
+  ProposalContext,
   ActionTarget,
   ActionWarning,
   PendingAction,
@@ -9,7 +11,7 @@ import { listActionApprovals } from "./approval-rules.js";
 
 
 const PENDING_ACTION_COLUMNS =
-  "id, workspace_id, conversation_id, tool_name, description, preview, args, status, result, created_at, resolved_at, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, run_as_account, target, warnings, executed_as_user_id, executed_as_account, required_approvals, approval_rule_id, approval_rule_name, auto_approved, auto_approve_allowed";
+  "id, workspace_id, conversation_id, tool_name, description, preview, args, status, result, created_at, resolved_at, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, run_as_account, target, warnings, executed_as_user_id, executed_as_account, required_approvals, approval_rule_id, approval_rule_name, auto_approved, auto_approve_allowed, change_preview, proposal_context";
 
 export async function createPendingAction(input: {
   workspaceId: string;
@@ -35,11 +37,13 @@ export async function createPendingAction(input: {
   autoApproved?: boolean;
   // False for workflows marked "Requires approval".
   autoApproveAllowed?: boolean;
+  changePreview?: ChangePreview | null;
+  proposalContext?: ProposalContext | null;
 }): Promise<PendingAction> {
   const pool = getPool();
   const result = await pool.query(
-    `INSERT INTO pending_actions (workspace_id, conversation_id, tool_name, description, preview, args, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, run_as_account, target, warnings, required_approvals, approval_rule_id, approval_rule_name, auto_approved, auto_approve_allowed)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+    `INSERT INTO pending_actions (workspace_id, conversation_id, tool_name, description, preview, args, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, run_as_account, target, warnings, required_approvals, approval_rule_id, approval_rule_name, auto_approved, auto_approve_allowed, change_preview, proposal_context)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
      RETURNING ${PENDING_ACTION_COLUMNS}`,
     [
       input.workspaceId,
@@ -60,6 +64,8 @@ export async function createPendingAction(input: {
       input.approvalRuleName ?? null,
       input.autoApproved ?? false,
       input.autoApproveAllowed ?? true,
+      input.changePreview ? JSON.stringify(input.changePreview) : null,
+      input.proposalContext ? JSON.stringify(input.proposalContext) : null,
     ]
   );
   return { ...toPendingAction(result.rows[0]), approvals: [] };
@@ -183,6 +189,8 @@ function toPendingAction(row: {
   approval_rule_name?: string | null;
   auto_approved?: boolean | null;
   auto_approve_allowed?: boolean | null;
+  change_preview?: ChangePreview | null;
+  proposal_context?: ProposalContext | null;
 }): PendingAction {
   return {
     id: row.id,
@@ -211,6 +219,8 @@ function toPendingAction(row: {
     approvalRuleName: row.approval_rule_name ?? null,
     autoApproved: row.auto_approved ?? false,
     autoApproveAllowed: row.auto_approve_allowed ?? true,
+    changePreview: row.change_preview ?? null,
+    proposalContext: row.proposal_context ?? null,
     expiresAt: new Date(row.created_at.getTime() + actionApprovalTtlHours() * 3_600_000).toISOString(),
   };
 }

@@ -10,7 +10,8 @@ import { createPostgresRoomBus, realtimeBusEnabled } from "./realtime-bus.js";
 import { toLlmHistory } from "./history.js";
 import { replyForResolvedActions, stripConfirmationBoilerplate, type AgentKind } from "./agent.js";
 import { resolveLlmConfig } from "./llm-client.js";
-import { buildToolsForWorkspace, wrapForProposal, registerActionRoutes, expireStaleActions } from "./actions.js";
+import { buildToolsForWorkspace, wrapForProposal, registerActionRoutes, expireStaleActions, recordReads, proposalRequest } from "./actions.js";
+import type { ProposalContext } from "@mai-chat/shared-types";
 import { channelMentions } from "./slack-channels.js";
 import { describeRulesForAgent } from "./approval-rules.js";
 import { registerGithubTeamRoutes, registerGithubWebhookRoutes, type GithubEventHandler } from "./routes/github-team.js";
@@ -318,14 +319,24 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     // Reviews and checks are runtime read-only. Workflows that explicitly
     // request a write retain proposal tools, never direct write execution.
     const actingAccount = agentKind === "project" ? undefined : built.accounts[agentKind];
-    const tools = wrapForProposal(specialistTools, workspaceId, conversationId, rooms, requestedBy.userId ? { userId: requestedBy.userId, name: requestedBy.name } : undefined, agentKind, {
+    // What the agent reads this turn, so each proposal can show why it was made.
+    const reads: ProposalContext["reads"] = [];
+    const latestRequest = [...messages].reverse().find((message) => message.role === "user")?.content ?? null;
+    const proposalContext = (): ProposalContext => ({
+      request: proposalRequest(workflowInstructions ? workflowInstructions : latestRequest),
+      requestedBy: requestedBy.name,
+      source: workflowInstructions ? "workflow" : "chat",
+      reads: reads.map((read) => ({ ...read })),
+    });
+    const tools = recordReads(wrapForProposal(specialistTools, workspaceId, conversationId, rooms, requestedBy.userId ? { userId: requestedBy.userId, name: requestedBy.name } : undefined, agentKind, {
       readOnly: workflowReadOnly,
       runAs: actingAccount,
       listOpenIssues: built.listOpenIssues,
       allowAutoApprove,
       githubLookups: built.githubLookups,
       slackChannelName: built.slackChannelName,
-    });
+      proposalContext,
+    }), reads);
     // A workflow configured for a specialist is an operational contract: it
     // must have that specialist's connected tool surface. Letting the model
     // write an apologetic text-only reply makes a broken integration look
