@@ -6,6 +6,7 @@ import {
   describeError,
   listAccountSessions,
   logout,
+  revokeAllAccountSessions,
   revokeOtherAccountSessions,
   type AccountSession,
 } from "../../../../lib/api";
@@ -25,6 +26,7 @@ export default function AccountBar({
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [sessions, setSessions] = useState<AccountSession[] | null>(null);
   const [status, setStatus] = useState("");
+  const [confirmAll, setConfirmAll] = useState(false);
 
   async function openSessions() {
     setSessionsOpen(true);
@@ -48,6 +50,16 @@ export default function AccountBar({
       );
     } catch (error) {
       setStatus(describeError(error, "Could not sign out other sessions."));
+    }
+  }
+
+  async function revokeAll() {
+    try {
+      await revokeAllAccountSessions();
+      window.location.href = "/";
+    } catch (error) {
+      setConfirmAll(false);
+      setStatus(describeError(error, "Could not sign out every session."));
     }
   }
 
@@ -113,13 +125,34 @@ export default function AccountBar({
                 {status}
               </p>
             )}
+            {confirmAll && (
+              <p className="auth-error" role="alert">
+                This signs you out on every device, including this browser. Continue?
+              </p>
+            )}
             <div className="app-dialog-actions">
               <button className="btn secondary" type="button" onClick={() => setSessionsOpen(false)}>
                 Close
               </button>
-              <button className="btn" type="button" onClick={revokeOthers} disabled={!sessions}>
-                Sign out other sessions
-              </button>
+              {confirmAll ? (
+                <>
+                  <button className="btn secondary" type="button" onClick={() => setConfirmAll(false)}>
+                    Cancel
+                  </button>
+                  <button className="btn danger" type="button" onClick={revokeAll}>
+                    Sign out everywhere
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="btn" type="button" onClick={revokeOthers} disabled={!sessions}>
+                    Sign out other sessions
+                  </button>
+                  <button className="btn danger" type="button" onClick={() => setConfirmAll(true)} disabled={!sessions}>
+                    Sign out everywhere
+                  </button>
+                </>
+              )}
             </div>
           </section>
         </div>

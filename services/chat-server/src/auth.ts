@@ -295,6 +295,15 @@ export function registerUserAuthRoutes(
     res.json({ revoked });
   });
 
+  // Emergency containment: revoke every browser/device session, including
+  // the caller. Unlike revoke-others, this intentionally ends the current
+  // requester's session too.
+  app.post("/auth/sessions/revoke-all", requireAuth, async (req: Request, res: Response) => {
+    await db.deleteSessionsForUser(req.user!.id);
+    clearSessionCookie(res, config);
+    res.status(204).end();
+  });
+
   app.post("/auth/logout", async (req: Request, res: Response) => {
     const token = parseSessionToken(req.headers.cookie);
     if (token) await db.deleteSession(token);

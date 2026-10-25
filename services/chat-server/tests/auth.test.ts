@@ -310,6 +310,13 @@ describe("session management", () => {
     expect(revoked.body).toEqual({ revoked: 1 });
     expect(await getUserBySessionToken(other.token)).toBeNull();
     expect(await getUserBySessionToken(currentToken)).not.toBeNull();
+
+    const another = await createSession(currentUser!.id, 60_000);
+    const revokeAll = await request(app).post("/auth/sessions/revoke-all").set("Cookie", cookie);
+    expect(revokeAll.status).toBe(204);
+    expect(String(revokeAll.headers["set-cookie"])).toContain("Max-Age=0");
+    expect(await getUserBySessionToken(currentToken)).toBeNull();
+    expect(await getUserBySessionToken(another.token)).toBeNull();
   });
 });
 

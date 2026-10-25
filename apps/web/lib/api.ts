@@ -991,6 +991,12 @@ export async function revokeOtherAccountSessions(): Promise<number> {
   return result.revoked;
 }
 
+/** Emergency containment: revoke every session, including this browser. */
+export async function revokeAllAccountSessions(): Promise<void> {
+  const res = await authenticatedFetch(`${CHAT_SERVER_URL}/auth/sessions/revoke-all`, { method: "POST" });
+  if (!res.ok) await parseJsonOrThrow(res);
+}
+
 export function loginWithGoogleUrl(returnTo?: string): string {
   const url = new URL(`${CHAT_SERVER_URL}/auth/login/google/start`);
   if (returnTo) url.searchParams.set("returnTo", returnTo);
