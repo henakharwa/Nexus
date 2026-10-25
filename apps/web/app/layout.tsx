@@ -14,6 +14,7 @@ import "./styles/09-agent-task.css";
 import "./styles/10-activity-audit.css";
 import "./styles/11-notification-run.css";
 import "./styles/12-access-app.css";
+import "./styles/13-approval-rules.css";
 import { DialogProvider } from "./_components/DialogProvider";
 
 export const metadata: Metadata = {

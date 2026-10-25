@@ -10,6 +10,7 @@ import { createMailer, defaultMailerConfig } from "./mailer.js";
 import type { GithubClient, SlackClient } from "@mai-chat/integrations";
 import type { ToolExecutor } from "./tools.js";
 import { createGithubTeamApi, type GithubTeamApi } from "./github-api.js";
+import { createSlackChannelFinder, createSlackChannelLookup, type SlackChannelFinder, type SlackChannelLookup } from "./slack-channels.js";
 import type { RunAgentTurnInput, RunAgentTurnResult } from "./agent.js";
 import type { UserAuthDeps } from "./auth.js";
 import type { Mailer } from "./mailer.js";
@@ -64,6 +65,12 @@ export interface CreateServerDeps {
   // webhooks. Omitted in tests, which then never reach github.com (access
   // is "unknown").
   githubTeamApi?: GithubTeamApi;
+  // Slack channel name for an ID, for approval rules written with names.
+  // Omitted in tests, which then never reach slack.com (the name is unknown).
+  slackChannelLookup?: SlackChannelLookup;
+  // Channel IDs for "#name" mentions in a Slack request (see slack-channels.ts).
+  // Omitted in tests unless a test injects one.
+  slackChannelFinder?: SlackChannelFinder;
 }
 
 // Real implementation of githubMcpToolsFactory above -- spawns (or, for an
@@ -153,4 +160,6 @@ export const defaultDeps: CreateServerDeps = {
   get githubTeamApi() {
     return (sharedGithubTeamApi ??= createGithubTeamApi());
   },
+  slackChannelLookup: createSlackChannelLookup(),
+  slackChannelFinder: createSlackChannelFinder(),
 };

@@ -7,6 +7,7 @@ End-to-end tests that drive the real app in Chromium with [Playwright](https://p
 | `auth.spec.ts` | Email sign-up, sign-out and sign-in; wrong password; sign-up on an email that already has an account |
 | `chat.spec.ts` | Two teammates in one workspace: presence, shared messages, the agent's reply, hand-offs, the message length limit |
 | `approvals.spec.ts` | Approval cards for everyone in the room, Editors unable to approve, cancelling, and a confirm that fails visibly |
+| `approval-rules.spec.ts` | An Admin creates a two-approver rule on the Approvals page; Editors can see but not change it; the requester can't approve; two other people approve in turn; the recommended rules in one click, with the small-team warning |
 | `workflows.spec.ts` | Creating a workflow through the builder and running it |
 | `integrations.spec.ts` | GitHub's per-member repository setup and GitHub events panel on the Integrations page |
 

@@ -10,7 +10,8 @@ import { createPostgresRoomBus, realtimeBusEnabled } from "./realtime-bus.js";
 import { toLlmHistory } from "./history.js";
 import { replyForResolvedActions, stripConfirmationBoilerplate, type AgentKind } from "./agent.js";
 import { resolveLlmConfig } from "./llm-client.js";
-import { buildToolsForWorkspace, wrapForProposal, registerActionRoutes } from "./actions.js";
+import { buildToolsForWorkspace, wrapForProposal, registerActionRoutes, expireStaleActions } from "./actions.js";
+import { channelMentions } from "./slack-channels.js";
 import { registerGithubTeamRoutes, registerGithubWebhookRoutes, type GithubEventHandler } from "./routes/github-team.js";
 import { formatTeamActivity, listTeamActivity, summarizeGithubEvent } from "./github-team.js";
 import type { MessageProvenance, TeamActivity } from "@mai-chat/shared-types";
@@ -35,6 +36,7 @@ import { registerMembersRoutes } from "./routes/members.js";
 import { registerConversationsRoutes } from "./routes/conversations.js";
 import { registerPreferencesRoutes } from "./routes/preferences.js";
 import { registerIntegrationsRoutes } from "./routes/integrations.js";
+import { registerApprovalRulesRoutes } from "./routes/approval-rules.js";
 import { workflowRequestsExternalChange, preferWorkspaceMemoryForRepositoryUnavailableWorkflow } from "./input-parsers.js";
 
 // Re-exported so existing imports (tests, actions.ts, index.ts) keep working.
@@ -170,6 +172,7 @@ export function createApp(deps: CreateServerDeps = defaultDeps) {
   registerPreferencesRoutes(routeContext);
   registerIntegrationsRoutes(routeContext);
   registerGithubTeamRoutes(routeContext);
+  registerApprovalRulesRoutes(routeContext);
 
   return app;
 }
@@ -181,6 +184,23 @@ export function createApp(deps: CreateServerDeps = defaultDeps) {
 // only exists once createChatServer has stood up the WebSocket layer, so
 // (like registerActionRoutes) this is added to the app separately from
 // createApp's own routes rather than living inside it.
+/**
+ * "#bugs = C0123ABCD" lines for the channels named in the newest chat
+ * message, or null when it names none or Slack couldn't be asked.
+ */
+export async function describeSlackChannelMentions(
+  messages: Array<{ role: string; content: string }>,
+  findSlackChannels: ((names: string[]) => Promise<Record<string, string | null>>) | undefined
+): Promise<string | null> {
+  if (!findSlackChannels) return null;
+  const latest = [...messages].reverse().find((message) => message.role === "user");
+  const names = latest ? channelMentions(latest.content) : [];
+  if (names.length === 0) return null;
+  const found = await findSlackChannels(names);
+  const lines = names.filter((name) => name in found).map((name) => (found[name] ? `- #${name} = channel ID ${found[name]}` : `- #${name}: not found among the channels this member can see`));
+  return lines.length ? lines.join("\n") : null;
+}
+
 export function registerDashboardBroadcastRoutes(app: Express, rooms: RoomRegistry): void {
   app.post("/workspaces/:id/artifacts/:artifactId/notify-health-change", async (req: Request, res: Response) => {
     const workspaceId = paramString(req.params.id);
@@ -267,7 +287,11 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     agentKind: AgentKind,
     configuredAgentId?: string,
     workflowInstructions?: string,
-    workflowReadOnly = false
+    workflowReadOnly = false,
+    // False for workflow runs marked "Requires approval": approval rules
+    // can't auto-approve their writes (block and require-approvals rules
+    // still apply).
+    allowAutoApprove = true
   ): Promise<{ toolCalls: number; estimatedTokens: number; estimatedCostUsd: number; providerPromptTokens: number | null; providerCompletionTokens: number | null; providerCostUsd: number | null; outputExcerpt: string; inputExcerpt: string | null; toolTrace: Array<{ name: string; durationMs: number; status: "succeeded" | "failed" }> }> {
     const configuredAgent = configuredAgentId ? await db.getPublishedWorkspaceAgent(workspaceId, configuredAgentId) : null;
     if (configuredAgentId && !configuredAgent) throw new Error("That workspace agent has not been published yet.");
@@ -297,6 +321,9 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       readOnly: workflowReadOnly,
       runAs: actingAccount,
       listOpenIssues: built.listOpenIssues,
+      allowAutoApprove,
+      githubLookups: built.githubLookups,
+      slackChannelName: built.slackChannelName,
     });
     // A workflow configured for a specialist is an operational contract: it
     // must have that specialist's connected tool surface. Letting the model
@@ -322,6 +349,10 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       .map((action) => `- ${action.description}: ${action.status}`)
       .join("\n");
     const workspaceMemory = await db.workspaceMemoryContext(workspaceId);
+    // "#bugs" in a Slack request: look the channel up in the member's
+    // channel list now, so the agent uses the exact channel instead of
+    // searching for it (and never substitutes another one).
+    const slackChannels = agentKind === "slack" ? await describeSlackChannelMentions(messages, built.findSlackChannels) : null;
     // What teammates and GitHub did recently, so the GitHub agent can point
     // out work that is already done or under way.
     const teamActivity = agentKind === "github" ? formatTeamActivity(await listTeamActivity(workspaceId, { hours: 24, limit: 8 }).catch(() => [])) : null;
@@ -343,6 +374,7 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       githubNotice: agentKind === "github" ? built.githubNotice ?? null : null,
       teamActivity,
       actionContext: recentActions || null,
+      slackChannels,
       agentKind,
       customInstructions: activeInstructions || undefined,
       knowledge: configuredAgent?.knowledge,
@@ -445,7 +477,8 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
         workflow.agentKind,
         workflow.workspaceAgentId ?? undefined,
         task,
-        !workflowRequestsExternalChange(workflow.instructions)
+        !workflowRequestsExternalChange(workflow.instructions),
+        !workflow.requiresApproval
       );
       await db.finishWorkflowRun(workflow.id, run.id, "succeeded", "Agent response completed.", telemetry);
       await db.recordAuditEvent({ workspaceId: workflow.workspaceId, eventType: "workflow.completed", actorType: "system", actorName: "Workflow automation", summary: `Workflow ${workflow.name} completed`, metadata: { workflowId: workflow.id, runId: run.id, trigger } });
@@ -534,7 +567,8 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     captureError(error, { where: "workflow-retention" });
   });
   const deliverNotificationJobs = () => void db.runWithAdvisoryLock("notification-delivery", async () => {
-    await Promise.all([db.escalateUnreadDecisionNotifications(), db.createDailyNotificationDigests()]);
+    // Approvals expire after ACTION_APPROVAL_TTL_HOURS (24 by default).
+    await Promise.all([db.escalateUnreadDecisionNotifications(), db.createDailyNotificationDigests(), expireStaleActions(rooms)]);
   }).catch((error) => {
     console.error("notification scheduler failed", error);
     captureError(error, { where: "notification-scheduler" });

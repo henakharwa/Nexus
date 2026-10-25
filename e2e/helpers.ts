@@ -85,16 +85,27 @@ export async function withDatabase<T>(work: (client: pg.Client) => Promise<T>): 
  * one. A real proposal needs a connected GitHub or Slack account and a model
  * that chooses to call a write tool, which a test run doesn't have.
  */
-export async function proposeAction(workspaceId: string, requester: { id: string; name: string }, description: string): Promise<string> {
+export async function proposeAction(
+  workspaceId: string,
+  requester: { id: string; name: string },
+  description: string,
+  // What an approval rule decided, the way the server stores it when the agent proposes.
+  rule?: { name: string; requiredApprovals: number },
+): Promise<string> {
   return withDatabase(async (client) => {
     const conversation = await client.query(`SELECT id FROM conversations WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`, [workspaceId]);
     const created = await client.query(
-      `INSERT INTO pending_actions (workspace_id, conversation_id, tool_name, description, preview, args, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id)
-       VALUES ($1, $2, 'create_issue', $3, $4, '{}'::jsonb, $5, $6, 'github', $5) RETURNING id`,
-      [workspaceId, conversation.rows[0].id, description, `Title: ${description}`, requester.id, requester.name],
+      `INSERT INTO pending_actions (workspace_id, conversation_id, tool_name, description, preview, args, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, required_approvals, approval_rule_name, approval_rule_id)
+       VALUES ($1, $2, 'create_issue', $3, $4, '{}'::jsonb, $5, $6, 'github', $5, $7, $8, $9) RETURNING id`,
+      [workspaceId, conversation.rows[0].id, description, `Title: ${description}`, requester.id, requester.name, rule?.requiredApprovals ?? 1, rule?.name ?? null, rule ? randomUUID() : null],
     );
     return created.rows[0].id as string;
   });
+}
+
+/** Changes a member's workspace role directly (there is no invite-as-Admin through a join code). */
+export async function setRole(workspaceId: string, userId: string, role: "admin" | "editor"): Promise<void> {
+  await withDatabase((client) => client.query("UPDATE workspace_members SET role = $3 WHERE workspace_id = $1 AND user_id = $2", [workspaceId, userId, role]));
 }
 
 export async function userIdFor(page: Page): Promise<string> {

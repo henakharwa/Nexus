@@ -5,10 +5,11 @@ import type {
   PendingAction,
   PendingActionStatus } from "@mai-chat/shared-types";
 import { getPool } from "./pool.js";
+import { listActionApprovals } from "./approval-rules.js";
 
 
 const PENDING_ACTION_COLUMNS =
-  "id, workspace_id, conversation_id, tool_name, description, preview, args, status, result, created_at, resolved_at, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, run_as_account, target, warnings, executed_as_user_id, executed_as_account";
+  "id, workspace_id, conversation_id, tool_name, description, preview, args, status, result, created_at, resolved_at, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, run_as_account, target, warnings, executed_as_user_id, executed_as_account, required_approvals, approval_rule_id, approval_rule_name, auto_approved, auto_approve_allowed";
 
 export async function createPendingAction(input: {
   workspaceId: string;
@@ -27,11 +28,18 @@ export async function createPendingAction(input: {
   runAsAccount?: string | null;
   target?: ActionTarget | null;
   warnings?: ActionWarning[];
+  // What the approval rules decided (see approval-rules.ts in the chat server).
+  requiredApprovals?: number;
+  approvalRuleId?: string | null;
+  approvalRuleName?: string | null;
+  autoApproved?: boolean;
+  // False for workflows marked "Requires approval".
+  autoApproveAllowed?: boolean;
 }): Promise<PendingAction> {
   const pool = getPool();
   const result = await pool.query(
-    `INSERT INTO pending_actions (workspace_id, conversation_id, tool_name, description, preview, args, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, run_as_account, target, warnings)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    `INSERT INTO pending_actions (workspace_id, conversation_id, tool_name, description, preview, args, requested_by_user_id, requested_by_name, agent_kind, run_as_user_id, run_as_account, target, warnings, required_approvals, approval_rule_id, approval_rule_name, auto_approved, auto_approve_allowed)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING ${PENDING_ACTION_COLUMNS}`,
     [
       input.workspaceId,
@@ -47,9 +55,14 @@ export async function createPendingAction(input: {
       input.runAsAccount ?? null,
       input.target ? JSON.stringify(input.target) : null,
       JSON.stringify(input.warnings ?? []),
+      input.requiredApprovals ?? 1,
+      input.approvalRuleId ?? null,
+      input.approvalRuleName ?? null,
+      input.autoApproved ?? false,
+      input.autoApproveAllowed ?? true,
     ]
   );
-  return toPendingAction(result.rows[0]);
+  return { ...toPendingAction(result.rows[0]), approvals: [] };
 }
 
 /**
@@ -81,7 +94,7 @@ export async function getPendingAction(workspaceId: string, id: string): Promise
     `SELECT ${PENDING_ACTION_COLUMNS} FROM pending_actions WHERE workspace_id = $1 AND id = $2`,
     [workspaceId, id]
   );
-  return result.rows[0] ? toPendingAction(result.rows[0]) : null;
+  return result.rows[0] ? (await withApprovals([toPendingAction(result.rows[0])]))[0] : null;
 }
 
 // onlyPending=true (the default the UI uses on load) hides the
@@ -95,7 +108,37 @@ export async function listPendingActions(workspaceId: string, conversationId: st
       : `SELECT ${PENDING_ACTION_COLUMNS} FROM pending_actions WHERE workspace_id = $1 AND conversation_id = $2 ORDER BY created_at ASC`,
     [workspaceId, conversationId]
   );
-  return result.rows.map(toPendingAction);
+  return withApprovals(result.rows.map(toPendingAction));
+}
+
+/**
+ * How long an action may wait for approval before it is cancelled. Set with
+ * ACTION_APPROVAL_TTL_HOURS (1 to 720); 24 hours by default.
+ */
+export function actionApprovalTtlHours(): number {
+  const value = Number(process.env.ACTION_APPROVAL_TTL_HOURS);
+  return Number.isFinite(value) && value >= 1 && value <= 720 ? value : 24;
+}
+
+/**
+ * Cancels every action that has waited longer than the approval window and
+ * returns them, so the caller can tell the rooms. Safe to run from several
+ * servers at once: each row is updated only while still pending.
+ */
+export async function expireStalePendingActions(hours = actionApprovalTtlHours()): Promise<PendingAction[]> {
+  const result = await getPool().query(
+    `UPDATE pending_actions SET status = 'cancelled', result = $2, resolved_at = now()
+     WHERE status = 'pending' AND created_at < now() - ($1::float * interval '1 hour')
+     RETURNING ${PENDING_ACTION_COLUMNS}`,
+    [hours, `Expired: nobody approved it within ${hours} hours.`]
+  );
+  return withApprovals(result.rows.map(toPendingAction));
+}
+
+/** Adds who has approved each action so far. */
+async function withApprovals(actions: PendingAction[]): Promise<PendingAction[]> {
+  const approvals = await listActionApprovals(actions.map((action) => action.id));
+  return actions.map((action) => ({ ...action, approvals: approvals.get(action.id) ?? [] }));
 }
 
 export async function resolvePendingAction(input: {
@@ -111,7 +154,7 @@ export async function resolvePendingAction(input: {
      RETURNING ${PENDING_ACTION_COLUMNS}`,
     [input.workspaceId, input.id, input.status, input.result ?? null]
   );
-  return result.rows[0] ? toPendingAction(result.rows[0]) : null;
+  return result.rows[0] ? (await withApprovals([toPendingAction(result.rows[0])]))[0] : null;
 }
 
 function toPendingAction(row: {
@@ -135,6 +178,11 @@ function toPendingAction(row: {
   warnings?: ActionWarning[] | null;
   executed_as_user_id?: string | null;
   executed_as_account?: string | null;
+  required_approvals?: number | null;
+  approval_rule_id?: string | null;
+  approval_rule_name?: string | null;
+  auto_approved?: boolean | null;
+  auto_approve_allowed?: boolean | null;
 }): PendingAction {
   return {
     id: row.id,
@@ -158,6 +206,12 @@ function toPendingAction(row: {
     warnings: Array.isArray(row.warnings) ? row.warnings : [],
     executedAsUserId: row.executed_as_user_id ?? null,
     executedAsAccount: row.executed_as_account ?? null,
+    requiredApprovals: row.required_approvals ?? 1,
+    approvalRuleId: row.approval_rule_id ?? null,
+    approvalRuleName: row.approval_rule_name ?? null,
+    autoApproved: row.auto_approved ?? false,
+    autoApproveAllowed: row.auto_approve_allowed ?? true,
+    expiresAt: new Date(row.created_at.getTime() + actionApprovalTtlHours() * 3_600_000).toISOString(),
   };
 }
 
