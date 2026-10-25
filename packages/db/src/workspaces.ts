@@ -168,12 +168,16 @@ export async function acceptWorkspaceInvitation(
       await client.query("COMMIT");
       return { kind: "invalid" };
     }
-    const identity = await client.query(
-      "SELECT email FROM user_email_identities WHERE user_id = $1 ORDER BY verified_at DESC LIMIT 1",
-      [userId],
-    );
     const invitedEmail = invite.rows[0].email as string;
-    if (!identity.rows[0] || identity.rows[0].email !== invitedEmail) {
+    // An account can legitimately have more than one verified identity (for
+    // example, a password sign-in plus a linked OAuth provider). The invite
+    // must match any verified identity, rather than whichever one happened to
+    // be verified most recently.
+    const identity = await client.query(
+      "SELECT 1 FROM user_email_identities WHERE user_id = $1 AND email = $2",
+      [userId, invitedEmail],
+    );
+    if (!identity.rows[0]) {
       await client.query("COMMIT");
       return { kind: "email_mismatch", email: invitedEmail };
     }

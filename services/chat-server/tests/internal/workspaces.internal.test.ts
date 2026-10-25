@@ -1,7 +1,7 @@
 // Workspaces, join codes, invitations, membership and leaving.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
-import { closePool } from "@mai-chat/db";
+import { closePool, getPool } from "@mai-chat/db";
 import { setupDatabase, makeUser, newApp, makeWorkspace, sentEmails, NIL_UUID, type TestUser } from "./helpers.js";
 
 let admin: TestUser;
@@ -205,6 +205,28 @@ describe("WS-04 invitations", () => {
     expect(
       (await request(app).post("/workspace-invitations/accept").set("Cookie", invitee.cookie).send({ token })).status,
     ).toBe(404);
+  });
+  it("edge: accepts an invited address when the account has multiple verified email identities", async () => {
+    const ws = await makeWorkspace(app, admin);
+    const invitee = await makeUser("MultiIdentityInvitee");
+    await getPool().query("INSERT INTO user_email_identities (email, user_id) VALUES ($1, $2)", [
+      `linked-${Date.now()}@example.test`,
+      invitee.id,
+    ]);
+    const created = await request(app)
+      .post(`/workspaces/${ws.id}/invitations`)
+      .set("Cookie", admin.cookie)
+      .send({ email: invitee.email, role: "editor" });
+    expect(created.status).toBe(201);
+    const invitationEmail = sentEmails.find((email) => email.to === invitee.email);
+    expect(invitationEmail).toBeDefined();
+    const token = new URL(invitationEmail!.text.match(/https?:\/\/\S+/)![0])
+      .searchParams.get("invite");
+    const accepted = await request(app)
+      .post("/workspace-invitations/accept")
+      .set("Cookie", invitee.cookie)
+      .send({ token });
+    expect(accepted.body.workspaceId).toBe(ws.id);
   });
   it("edge: rejects invalid email, invalid role and existing members", async () => {
     const ws = await makeWorkspace(app, admin, [editor]);
