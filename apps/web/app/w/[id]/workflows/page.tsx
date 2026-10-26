@@ -12,6 +12,7 @@ import type {
   WorkflowTrigger,
 } from "@mai-chat/shared-types";
 import { AccessNotice } from "../../../_components/AccessNotice";
+import { useWorkspaceUser } from "../../../_components/WorkspaceAuth";
 import { useWorkspaceAccess } from "../../../../lib/useWorkspaceAccess";
 import { missingRequiredFields } from "../../../../lib/builder-validation";
 import {
@@ -136,10 +137,18 @@ export default function WorkflowsPage() {
   const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
 
   const access = useWorkspaceAccess(workspaceId);
+  const user = useWorkspaceUser();
   const dialog = useDialog();
   // Create, edit, delete, enable, schedule, and run: Admins by default,
   // Editors with the manageWorkflows permission. Viewing is shared.
   const canChange = access.can("manageWorkflows");
+  // Server-side workflow changes are restricted further than the workspace
+  // permission: an existing workflow can only be changed by its owner or an
+  // Admin. Mirror that rule in the builder so an Editor never spends time
+  // editing a draft that the server must reject on save. New workflows are
+  // still available to Editors who have Manage workflows.
+  const canEditSelectedWorkflow = !selected || access.isAdmin || selected.ownerUserId === user.id;
+  const canModifyWorkflow = canChange && canEditSelectedWorkflow;
   const refresh = async () => setWorkflows(await listWorkspaceWorkflows(workspaceId));
   useEffect(() => {
     void Promise.all([
@@ -476,7 +485,7 @@ export default function WorkflowsPage() {
               <div className="workflow-heading-actions">
                 <button
                   className="secondary-button workflow-run-button"
-                  disabled={saving || !canChange}
+                  disabled={saving || !canModifyWorkflow}
                   onClick={() => void run()}
                 >
                   Run now
@@ -556,7 +565,7 @@ export default function WorkflowsPage() {
             ))}
           </section>
           <section className="workflow-builder-stage">
-            <fieldset className="access-readonly" disabled={!canChange}>
+            <fieldset className="access-readonly" disabled={!canModifyWorkflow}>
               {builderStep === "identity" && (
                 <>
                   <p className="workflow-stage-kicker">STEP 1 · IDENTITY</p>
@@ -791,7 +800,7 @@ export default function WorkflowsPage() {
                       <button
                         type="button"
                         className="secondary-button"
-                        disabled={saving || !canChange}
+                        disabled={saving || !canModifyWorkflow}
                         onClick={() =>
                           void run(
                             draft.trigger === "manual" || draft.trigger === "schedule" ? "manual" : draft.trigger,
@@ -864,18 +873,26 @@ export default function WorkflowsPage() {
             ) : (
               <button
                 className="primary-button"
-                disabled={saving || !canChange || !draft.name.trim() || !draft.instructions.trim()}
+                disabled={saving || !canModifyWorkflow || !draft.name.trim() || !draft.instructions.trim()}
                 onClick={() => void save()}
               >
                 {saving ? "Saving…" : selected ? "Save changes" : "Create workflow"}
               </button>
             )}
             {selected && (
-              <button className="agent-delete-button" disabled={saving || !canChange} onClick={() => void remove()}>
+              <button className="agent-delete-button" disabled={saving || !canModifyWorkflow} onClick={() => void remove()}>
                 Delete
               </button>
             )}
           </div>
+          {selected && !canEditSelectedWorkflow && (
+            <aside className="workflow-diagnostic" data-testid="workflow-read-only">
+              <strong>Read-only workflow</strong>
+              <span>
+                Only {selected.ownerName ?? "this workflow's owner"} or a workspace Admin can change, run, or delete it.
+              </span>
+            </aside>
+          )}
           <AccessNotice
             workspaceId={workspaceId}
             access={access}
@@ -935,7 +952,7 @@ export default function WorkflowsPage() {
                   <span>
                     {selected.ownerName ?? "Its owner"} is no longer a member. Runs fail until someone takes it over.
                   </span>
-                  {canChange && (
+                  {access.isAdmin && (
                     <button
                       type="button"
                       className="secondary-button"
