@@ -11,7 +11,7 @@ ignores `.env` and `.env.oracle`; commit only `.env.example` and
 
 - `POSTGRES_PASSWORD` — the VM's own PostgreSQL database (`docker-compose.oracle.yml`
   builds `DATABASE_URL` from it).
-- `INTEGRATION_ENCRYPTION_KEY` — changing it makes previously stored
+- `INTEGRATION_ENCRYPTION_KEY` — legacy single-key configuration. For key rotation, use `INTEGRATION_ENCRYPTION_KEYS` as `new-key-id=<base64-32-byte-key>,old-key-id=<base64-32-byte-key>`, deploy it, run `npm run rotate:integration-keys --workspace=packages/db`, then remove the old key only after the rotation succeeds. Changing a single legacy key directly makes previously stored
   integration tokens unreadable, so rotate deliberately.
 - `AGENT_LLM_API_KEY` and the matching `AGENT_LLM_BASE_URL` / `AGENT_LLM_MODEL`
   (plus the optional `AGENT_LLM_PRIMARY_*` values).

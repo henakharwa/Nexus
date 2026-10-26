@@ -4,7 +4,7 @@ import { errMessage } from "./http-utils.js";
 import { resolveLlmConfig } from "./llm-client.js";
 import type { CreateServerDeps } from "./server-deps.js";
 
-export async function workspaceDashboardSnapshot(workspaceId: string, deps: CreateServerDeps) {
+export async function workspaceDashboardSnapshot(workspaceId: string, deps: CreateServerDeps, requestingUserId?: string) {
   const [integrations, workflows, members, conversations, recentAudit] = await Promise.all([
     db.listIntegrations(workspaceId), db.listWorkspaceWorkflows(workspaceId), db.listWorkspaceMembers(workspaceId), db.listConversations(workspaceId),
     db.listAuditEvents(workspaceId, { eventType: "action.failed", limit: 10 }),
@@ -20,7 +20,7 @@ export async function workspaceDashboardSnapshot(workspaceId: string, deps: Crea
   // dead/revoked token degrades this one metric rather than the whole
   // dashboard: caught and treated as "no data" instead of failing the
   // refresh.
-  const githubIntegration = integrations.find((integration): integration is Extract<typeof integrations[number], { type: "github" }> => integration.type === "github" && Boolean(integration.owner) && Boolean(integration.repo));
+  const githubIntegration = integrations.find((integration): integration is Extract<typeof integrations[number], { type: "github" }> => integration.type === "github" && integration.ownerUserId === requestingUserId && Boolean(integration.owner) && Boolean(integration.repo));
   let openGithubIssues: number | null = null;
   if (githubIntegration?.id && githubIntegration.owner && githubIntegration.repo) {
     try {
@@ -73,11 +73,11 @@ export async function workspaceDashboardSnapshot(workspaceId: string, deps: Crea
 // draft isn't just prose -- see the "Generate from GitHub" button in
 // apps/web's artifacts page. A person still edits this before publishing;
 // it's a draft, not a silent auto-publish.
-export async function workspaceReleaseNotesDraft(workspaceId: string, artifactId: string, deps: CreateServerDeps): Promise<string> {
+export async function workspaceReleaseNotesDraft(workspaceId: string, artifactId: string, deps: CreateServerDeps, requestingUserId?: string): Promise<string> {
   const [integrations, existingArtifacts] = await Promise.all([db.listIntegrations(workspaceId), db.listWorkspaceArtifacts(workspaceId)]);
   const githubIntegration = integrations.find(
     (integration): integration is Extract<typeof integrations[number], { type: "github" }> =>
-      integration.type === "github" && Boolean(integration.owner) && Boolean(integration.repo)
+      integration.type === "github" && integration.ownerUserId === requestingUserId && Boolean(integration.owner) && Boolean(integration.repo)
   );
   const previousRelease = existingArtifacts
     .filter((artifact) => artifact.type === "release_notes" && artifact.status === "published" && artifact.id !== artifactId)

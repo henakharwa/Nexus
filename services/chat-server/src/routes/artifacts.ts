@@ -75,7 +75,7 @@ export function registerArtifactsRoutes({ app, deps, requireRole, requirePermiss
     if (!access.artifact) return res.status(404).json({ error: "Artifact not found." });
     if (!access.allowed) return res.status(403).json({ error: "Only the artifact author or an Admin can refresh it." });
     if (access.artifact.type !== "dashboard") return res.status(400).json({ error: "Only Dashboard artifacts can be refreshed." });
-    const dashboardData = await workspaceDashboardSnapshot(access.artifact.workspaceId, deps);
+    const dashboardData = await workspaceDashboardSnapshot(access.artifact.workspaceId, deps, req.user!.id);
     const artifact = await db.updateWorkspaceArtifact(access.artifact.workspaceId, access.artifact.id, { type: access.artifact.type, status: access.artifact.status, title: access.artifact.title, summary: access.artifact.summary, content: access.artifact.content, dashboardData, ownerUserId: access.artifact.ownerUserId, releaseVersion: access.artifact.releaseVersion }, req.user!.id);
     if (!artifact) return res.status(404).json({ error: "Artifact not found." });
     await db.recordAuditEvent({ workspaceId: artifact.workspaceId, eventType: "artifact.updated", actorType: "system", actorName: "Dashboard refresh", summary: `${req.user!.displayName} refreshed live workspace data for ${artifact.title}` }); res.json(artifact);
@@ -102,7 +102,7 @@ export function registerArtifactsRoutes({ app, deps, requireRole, requirePermiss
     if (!access.artifact) return res.status(404).json({ error: "Artifact not found." });
     if (!access.allowed) return res.status(403).json({ error: "Only the artifact author or an Admin can generate it." });
     if (access.artifact.type !== "release_notes") return res.status(400).json({ error: "Only Release notes artifacts can be generated." });
-    const content = await workspaceReleaseNotesDraft(access.artifact.workspaceId, access.artifact.id, deps);
+    const content = await workspaceReleaseNotesDraft(access.artifact.workspaceId, access.artifact.id, deps, req.user!.id);
     const artifact = await db.updateWorkspaceArtifact(access.artifact.workspaceId, access.artifact.id, { type: access.artifact.type, status: access.artifact.status, title: access.artifact.title, summary: access.artifact.summary, content, dashboardData: null, ownerUserId: access.artifact.ownerUserId, releaseVersion: access.artifact.releaseVersion }, req.user!.id);
     if (!artifact) return res.status(404).json({ error: "Artifact not found." });
     await db.recordAuditEvent({ workspaceId: artifact.workspaceId, eventType: "artifact.updated", actorType: "system", actorName: "Release notes generator", summary: `${req.user!.displayName} generated release notes for ${artifact.title} from GitHub activity` });
@@ -129,7 +129,10 @@ export function registerArtifactsRoutes({ app, deps, requireRole, requirePermiss
     if (!access.allowed) return res.status(403).json({ error: "Only the artifact author or an Admin can share it." });
     const channel = typeof req.body?.channel === "string" ? req.body.channel.trim() : "";
     if (!channel) return res.status(400).json({ error: "A Slack channel is required." });
-    const slackIntegration = (await db.listIntegrations(access.artifact.workspaceId)).find((integration) => integration.type === "slack");
+    // Never borrow a teammate's Slack identity for a direct share.
+    const slackIntegration = (await db.listIntegrations(access.artifact.workspaceId)).find(
+      (integration) => integration.type === "slack" && integration.ownerUserId === req.user!.id,
+    );
     if (!slackIntegration?.id) return res.status(400).json({ error: "Slack isn't connected for this workspace yet." });
     const credential = await db.getIntegrationCredential(access.artifact.workspaceId, "slack", slackIntegration.id);
     if (!credential) return res.status(400).json({ error: "Slack isn't connected for this workspace yet." });

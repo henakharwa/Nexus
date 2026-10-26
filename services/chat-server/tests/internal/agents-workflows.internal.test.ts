@@ -115,6 +115,12 @@ describe("WF-01 workflows", () => {
     const wf = (await request(app).post(workflows()).set("Cookie", admin.cookie).send({ name: "Manual only", instructions: "i" })).body;
     expect((await request(app).post(`${workflows()}/${wf.id}/run`).set("Cookie", admin.cookie).send({ trigger: "slack_mention" })).status).toBe(400);
   });
+  it("security: manual runs reject caller-supplied event data", async () => {
+    const wf = (await request(app).post(workflows()).set("Cookie", admin.cookie).send({ name: "Verified events only", instructions: "i" })).body;
+    const response = await request(app).post(`${workflows()}/${wf.id}/run`).set("Cookie", admin.cookie).send({ eventText: "pretend this came from GitHub" });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/verified provider webhooks/i);
+  });
   it("edge: run history pagination ignores bad limit/before values", async () => {
     for (const q of ["?limit=abc", "?limit=-1", "?limit=1.5", "?limit=100000", "?before=garbage"]) {
       expect((await request(app).get(`/workspaces/${ws.id}/workflow-runs${q}`).set("Cookie", admin.cookie)).status, q).toBe(200);
@@ -132,6 +138,15 @@ describe("WF-01 workflows", () => {
     expect((await request(app).patch(`${workflows()}/${wf.id}`).set("Cookie", editor.cookie).send({ name: "x", instructions: "y" })).status).toBe(403);
     await grantEditor(ws.id, { manageWorkflows: true });
     expect((await request(app).post(`${workflows()}/${wf.id}/run`).set("Cookie", editor.cookie)).status).toBe(202);
+    await grantEditor(ws.id, { manageWorkflows: false });
+  });
+  it("security: only Admins can take over a workflow", async () => {
+    const wf = (await request(app).post(workflows()).set("Cookie", admin.cookie).send({ name: "Admin owned", instructions: "i" })).body;
+    await grantEditor(ws.id, { manageWorkflows: true });
+    expect((await request(app).post(`/workspaces/${ws.id}/workflows/${wf.id}/take-over`).set("Cookie", editor.cookie)).status).toBe(403);
+    const taken = await request(app).post(`/workspaces/${ws.id}/workflows/${wf.id}/take-over`).set("Cookie", admin.cookie);
+    expect(taken.status).toBe(200);
+    expect(taken.body.ownerUserId).toBe(admin.id);
     await grantEditor(ws.id, { manageWorkflows: false });
   });
 });

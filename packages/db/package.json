@@ -10,7 +10,8 @@
     "test": "vitest run --no-file-parallelism",
     "migrate": "tsx src/migrate.ts",
     "migrate:status": "tsx src/migrate.ts status",
-    "migrate:down": "tsx src/migrate.ts down"
+    "migrate:down": "tsx src/migrate.ts down",
+    "rotate:integration-keys": "tsx src/rotate-integration-keys.ts"
   },
   "dependencies": {
     "@mai-chat/shared-types": "0.1.0",

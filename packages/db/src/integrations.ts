@@ -4,7 +4,7 @@ import type {
   IntegrationConfig,
   SlackIntegrationConfig } from "@mai-chat/shared-types";
 import { getPool } from "./pool.js";
-import { encryptToken, decryptToken } from "./crypto.js";
+import { encryptToken, decryptToken, needsTokenReencryption } from "./crypto.js";
 
 
 export async function upsertGithubIntegration(input: {
@@ -246,8 +246,36 @@ export async function deleteIntegrationForOwner(
   return (result.rowCount ?? 0) > 0;
 }
 
+/** Retrieves a member's secret only for a server-side provider revocation. */
+export async function getIntegrationCredentialForOwner(
+  workspaceId: string,
+  type: "github" | "slack" | "linear" | "notion" | "figma",
+  integrationId: string,
+  ownerUserId: string,
+): Promise<{ token: string } | null> {
+  const result = await getPool().query(
+    "SELECT encrypted_token FROM integrations WHERE workspace_id=$1 AND type=$2 AND id=$3 AND owner_user_id=$4",
+    [workspaceId, type, integrationId, ownerUserId],
+  );
+  return result.rows[0] ? { token: decryptToken(result.rows[0].encrypted_token) } : null;
+}
+
 export async function deletePersonalIntegrationsForUser(userId: string): Promise<void> {
   await getPool().query(`DELETE FROM integrations WHERE owner_user_id = $1 AND connection_scope = 'personal'`, [userId]);
+}
+
+/** Re-encrypts every integration secret with the active key-ring key. Run
+ * this only after deploying a key ring containing both the new and old keys. */
+export async function reencryptIntegrationCredentials(): Promise<number> {
+  const pool = getPool();
+  const result = await pool.query("SELECT id, encrypted_token FROM integrations FOR UPDATE");
+  let rotated = 0;
+  for (const row of result.rows) {
+    if (!needsTokenReencryption(row.encrypted_token)) continue;
+    await pool.query("UPDATE integrations SET encrypted_token=$2 WHERE id=$1", [row.id, encryptToken(decryptToken(row.encrypted_token))]);
+    rotated += 1;
+  }
+  return rotated;
 }
 
 

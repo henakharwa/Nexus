@@ -16,8 +16,11 @@ import type { UserAuthDeps } from "./auth.js";
 import type { Mailer } from "./mailer.js";
 import type { GithubOAuthConfig, GithubOAuthDeps } from "./github-oauth.js";
 import type { SlackOAuthConfig, SlackOAuthDeps } from "./slack-oauth.js";
+import { revokeProviderToken as defaultRevokeProviderToken } from "./provider-token-revocation.js";
 
 export interface CreateServerDeps {
+  /** Best-effort provider-side credential revocation before local removal. */
+  revokeProviderToken?: (provider: "github" | "slack" | "linear" | "notion" | "figma", token: string, github?: { clientId: string; clientSecret: string }) => Promise<void>;
   userAuthDeps?: UserAuthDeps;
   // Used ONLY to verify a pasted GitHub token/owner/repo before saving it
   // (the two /integrations/github... routes below) -- NOT the agent's
@@ -139,6 +142,7 @@ export function defaultSlackOAuthConfig(): SlackOAuthConfig {
 let sharedGithubTeamApi: GithubTeamApi | undefined;
 
 export const defaultDeps: CreateServerDeps = {
+  revokeProviderToken: defaultRevokeProviderToken,
   githubClientFactory: createGithubClient,
   slackClientFactory: createSlackClient,
   githubMcpToolsFactory: defaultGithubMcpToolsFactory,

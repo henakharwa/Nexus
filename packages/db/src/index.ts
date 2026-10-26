@@ -1,7 +1,7 @@
 // Public API of @mai-chat/db. Implementation is split by domain into the
 // modules below; only the names exported before the split are re-exported here.
 export { getPool, closePool, openListenerConnection, closeListenerConnection } from "./pool.js";
-export { encryptToken, decryptToken, hashSessionToken } from "./crypto.js";
+export { encryptToken, decryptToken, needsTokenReencryption, hashSessionToken } from "./crypto.js";
 export { runMigrations, rollbackLastMigration, listMigrationFiles, listAppliedMigrations } from "./migrations.js";
 export type { MigrationFile, AppliedMigration } from "./migrations.js";
 export {
@@ -97,6 +97,11 @@ export {
   setWorkflowOwner,
   listEventWorkflows,
   createWorkflowRun,
+  createWorkflowRunWithinQuota,
+  countWorkspaceWorkflows,
+  hasWorkflowRunCapacity,
+  workflowCountLimit,
+  workflowRunQuotaPerHour,
   finishWorkflowRun,
   countRecentFailedWorkflowRuns,
   getObservabilityRetentionPolicy,
@@ -143,8 +148,10 @@ export {
   setFigmaTeam,
   listIntegrations,
   getIntegrationCredential,
+  getIntegrationCredentialForOwner,
   deleteIntegrationForOwner,
   deletePersonalIntegrationsForUser,
+  reencryptIntegrationCredentials,
 } from "./integrations.js";
 export {
   createPendingAction,

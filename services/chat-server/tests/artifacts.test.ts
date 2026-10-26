@@ -42,6 +42,7 @@ function makeDeps(overrides: Partial<CreateServerDeps> = {}): CreateServerDeps {
 }
 
 let ownerCookie: string;
+let ownerId: string;
 let editorCookie: string;
 let editorId: string;
 let outsiderCookie: string;
@@ -49,6 +50,7 @@ let outsiderCookie: string;
 beforeAll(async () => {
   await runMigrations();
   const owner = await upsertUserFromGithub({ githubId: `artifacts-owner-${randomUUID()}`, username: "artifacts-owner", displayName: "Artifacts Owner" });
+  ownerId = owner.id;
   ownerCookie = `mai_session=${(await createSession(owner.id, 60_000)).token}`;
   const editor = await upsertUserFromGithub({ githubId: `artifacts-editor-${randomUUID()}`, username: "artifacts-editor", displayName: "Artifacts Editor" });
   editorId = editor.id;
@@ -329,12 +331,7 @@ describe("artifacts: share to Slack", () => {
     postedMessages = [];
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    // A shared (workspace-wide, not per-member) Slack connection, same as
-    // a real OAuth grant would leave behind -- see upsertSlackIntegration's
-    // own comment on connectionScope. slack-workflow.test.ts exercises the
-    // real OAuth callback that produces this row; this test only needs a
-    // connected Slack integration to already exist, not to re-prove OAuth.
-    await upsertSlackIntegration({ workspaceId: workspace.id, teamName: "Artifacts QA", token: "xoxp-fake" });
+    await upsertSlackIntegration({ workspaceId: workspace.id, teamName: "Artifacts QA", token: "xoxp-fake", ownerUserId: ownerId });
 
     const report = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
       .send({ type: "report", status: "published", title: "Weekly update", summary: "", content: "## Progress\n\nShipped the thing" });

@@ -67,7 +67,10 @@ export function registerWorkflowsRoutes({ app, requireRole, requirePermission }:
       return res.status(400).json({ error: "Choose a published workspace agent." });
     if (input.conversationId && !(await db.getConversation(paramString(req.params.id), input.conversationId)))
       return res.status(400).json({ error: "Choose a conversation in this workspace." });
-    const workflow = await db.createWorkspaceWorkflow(paramString(req.params.id), req.user!.id, input);
+    const workspaceId = paramString(req.params.id);
+    if ((await db.countWorkspaceWorkflows(workspaceId)) >= db.workflowCountLimit())
+      return res.status(429).json({ error: `This workspace has reached its ${db.workflowCountLimit()} workflow limit.` });
+    const workflow = await db.createWorkspaceWorkflow(workspaceId, req.user!.id, input);
     await db.recordAuditEvent({
       workspaceId: workflow.workspaceId,
       eventType: "workflow.created",
@@ -101,6 +104,10 @@ export function registerWorkflowsRoutes({ app, requireRole, requirePermission }:
       paramString(req.params.id),
       paramString(req.params.workflowId),
       input,
+      // A person who materially edits a workflow becomes responsible for
+      // future runs and the connections used by them. Their own provider
+      // accounts are therefore used on the next scheduled/event run.
+      req.user!.id,
     );
     if (!workflow) return res.status(404).json({ error: "Workflow not found." });
     await db.recordAuditEvent({
@@ -191,6 +198,10 @@ export function registerWorkflowsRoutes({ app, requireRole, requirePermission }:
     if (trigger !== "manual" && trigger !== workflow.trigger)
       return res.status(400).json({ error: "This event does not match the workflow trigger." });
     const eventText = typeof req.body?.eventText === "string" ? req.body.eventText.trim().slice(0, 4_000) : "";
+    if (eventText)
+      return res.status(400).json({ error: "Manual workflow runs cannot supply event data. Event data is accepted only from verified provider webhooks." });
+    if (!(await db.hasWorkflowRunCapacity(workflow.workspaceId)))
+      return res.status(429).json({ error: `This workspace has reached its hourly workflow-run limit (${db.workflowRunQuotaPerHour()}). Try again later.` });
     const runner = app.locals.runWorkflow as
       | undefined
       | ((
@@ -200,7 +211,7 @@ export function registerWorkflowsRoutes({ app, requireRole, requirePermission }:
           eventText?: string,
         ) => Promise<void>);
     if (!runner) return res.status(503).json({ error: "Workflow runner is starting. Try again in a moment." });
-    void runner(workflow, trigger, { id: req.user!.id, displayName: req.user!.displayName }, eventText || undefined);
+    void runner(workflow, trigger, { id: req.user!.id, displayName: req.user!.displayName });
     res.status(202).json({ accepted: true });
   });
 }

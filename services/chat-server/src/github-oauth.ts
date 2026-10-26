@@ -132,7 +132,10 @@ export function registerGithubOAuthRoutes(
     const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
     authorizeUrl.searchParams.set("client_id", config.clientId);
     authorizeUrl.searchParams.set("redirect_uri", config.redirectUri);
-    authorizeUrl.searchParams.set("scope", "repo");
+    // GitHub OAuth cannot restrict a grant to one selected private repo.
+    // Use the narrow public-repo grant; private repositories require a
+    // separately configured GitHub App installation.
+    authorizeUrl.searchParams.set("scope", "public_repo,read:user");
     authorizeUrl.searchParams.set("state", state);
     res.redirect(authorizeUrl.toString());
   });

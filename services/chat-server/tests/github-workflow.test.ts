@@ -143,7 +143,7 @@ describe("GitHub workflow release gate", () => {
     expect(oauthStart.status).toBe(302);
     const authorizeUrl = new URL(oauthStart.headers.location);
     expect(authorizeUrl.origin).toBe("https://github.com");
-    expect(authorizeUrl.searchParams.get("scope")).toBe("repo");
+    expect(authorizeUrl.searchParams.get("scope")).toBe("public_repo,read:user");
 
     const oauthCallback = await request(app)
       .get("/auth/github/callback")

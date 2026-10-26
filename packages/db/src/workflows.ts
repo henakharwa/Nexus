@@ -51,16 +51,16 @@ export async function createWorkspaceWorkflow(workspaceId: string, ownerUserId: 
   return toWorkflow(result.rows[0]);
 }
 
-export async function updateWorkspaceWorkflow(workspaceId: string, workflowId: string, input: Partial<WorkflowInput>): Promise<WorkspaceWorkflow | null> {
+export async function updateWorkspaceWorkflow(workspaceId: string, workflowId: string, input: Partial<WorkflowInput>, editorUserId?: string): Promise<WorkspaceWorkflow | null> {
   const current = await getWorkspaceWorkflow(workspaceId, workflowId);
   if (!current) return null;
   const merged = { ...current, ...input, name: input.name?.trim() || current.name, description: input.description?.trim() ?? current.description, instructions: input.instructions?.trim() ?? current.instructions };
   const scheduleMinutes = merged.trigger === "schedule" ? merged.scheduleMinutes : null;
   const nextRun = !merged.enabled ? null : workflowScheduleDate(merged.trigger, scheduleMinutes);
   const result = await getPool().query(
-    `UPDATE workspace_workflows SET name=$3,description=$4,instructions=$5,agent_kind=$6,workspace_agent_id=$7,conversation_id=$8,trigger=$9,schedule_minutes=$10,enabled=$11,next_run_at=$12,requires_approval=$13,updated_at=now()
+    `UPDATE workspace_workflows SET name=$3,description=$4,instructions=$5,agent_kind=$6,workspace_agent_id=$7,conversation_id=$8,trigger=$9,schedule_minutes=$10,enabled=$11,next_run_at=$12,requires_approval=$13,owner_user_id=COALESCE($14, owner_user_id),updated_at=now()
      WHERE workspace_id=$1 AND id=$2 RETURNING *`,
-    [workspaceId, workflowId, merged.name, merged.description, merged.instructions, merged.agentKind, merged.workspaceAgentId, merged.conversationId, merged.trigger, scheduleMinutes, merged.enabled, nextRun, merged.requiresApproval]
+    [workspaceId, workflowId, merged.name, merged.description, merged.instructions, merged.agentKind, merged.workspaceAgentId, merged.conversationId, merged.trigger, scheduleMinutes, merged.enabled, nextRun, merged.requiresApproval, editorUserId ?? null]
   );
   return result.rows[0] ? toWorkflow(result.rows[0]) : null;
 }
@@ -90,6 +90,48 @@ export async function createWorkflowRun(workflow: WorkspaceWorkflow, trigger: Wo
   const result = await getPool().query(
     `INSERT INTO workspace_workflow_runs (workflow_id,workspace_id,trigger) VALUES ($1,$2,$3) RETURNING *`, [workflow.id, workflow.workspaceId, trigger]
   );
+  await getPool().query("UPDATE workspace_workflows SET last_run_at=now(),last_run_status='running',last_run_error=NULL,updated_at=now() WHERE id=$1", [workflow.id]);
+  return toWorkflowRun(result.rows[0]);
+}
+
+/** A hard workspace-wide ceiling prevents a broken schedule or webhook from
+ * consuming unlimited provider capacity. The INSERT is conditional so the
+ * limit remains safe when multiple server instances race to start a run. */
+export function workflowRunQuotaPerHour(): number {
+  const configured = Number(process.env.WORKFLOW_RUNS_PER_WORKSPACE_PER_HOUR ?? 120);
+  return Number.isFinite(configured) ? Math.min(Math.max(Math.floor(configured), 1), 10_000) : 120;
+}
+
+export function workflowCountLimit(): number {
+  const configured = Number(process.env.WORKFLOWS_PER_WORKSPACE ?? 50);
+  return Number.isFinite(configured) ? Math.min(Math.max(Math.floor(configured), 1), 1_000) : 50;
+}
+
+export async function countWorkspaceWorkflows(workspaceId: string): Promise<number> {
+  const result = await getPool().query("SELECT count(*)::int AS count FROM workspace_workflows WHERE workspace_id=$1", [workspaceId]);
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+export async function hasWorkflowRunCapacity(workspaceId: string): Promise<boolean> {
+  const result = await getPool().query(
+    "SELECT count(*)::int AS count FROM workspace_workflow_runs WHERE workspace_id=$1 AND started_at >= now() - interval '1 hour'",
+    [workspaceId],
+  );
+  return Number(result.rows[0]?.count ?? 0) < workflowRunQuotaPerHour();
+}
+
+export async function createWorkflowRunWithinQuota(workflow: WorkspaceWorkflow, trigger: WorkflowTrigger): Promise<WorkflowRun | null> {
+  const result = await getPool().query(
+    `WITH capacity AS (
+       SELECT count(*) < $3::int AS allowed FROM workspace_workflow_runs
+       WHERE workspace_id=$2 AND started_at >= now() - interval '1 hour'
+     ), inserted AS (
+       INSERT INTO workspace_workflow_runs (workflow_id,workspace_id,trigger)
+       SELECT $1,$2,$4 WHERE (SELECT allowed FROM capacity) RETURNING *
+     ) SELECT * FROM inserted`,
+    [workflow.id, workflow.workspaceId, workflowRunQuotaPerHour(), trigger],
+  );
+  if (!result.rows[0]) return null;
   await getPool().query("UPDATE workspace_workflows SET last_run_at=now(),last_run_status='running',last_run_error=NULL,updated_at=now() WHERE id=$1", [workflow.id]);
   return toWorkflowRun(result.rows[0]);
 }

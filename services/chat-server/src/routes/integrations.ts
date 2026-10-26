@@ -42,7 +42,11 @@ export function registerIntegrationsRoutes({ app, deps, requireRole, requirePerm
     if (!UUID_RE.test(workspaceId)) return res.status(400).json({ error: "invalid workspace id" });
     if (!["github", "slack", "linear", "notion", "figma"].includes(provider)) return res.status(404).json({ error: "unknown integration" });
     if (!UUID_RE.test(integrationId)) return res.status(400).json({ error: "valid integrationId is required" });
-    const removed = await db.deleteIntegrationForOwner(workspaceId, provider as "github" | "slack" | "linear" | "notion" | "figma", integrationId, req.user!.id);
+    const providerName = provider as "github" | "slack" | "linear" | "notion" | "figma";
+    const credential = await db.getIntegrationCredentialForOwner(workspaceId, providerName, integrationId, req.user!.id);
+    if (!credential) return res.status(404).json({ error: "integration not found or is not owned by you" });
+    await deps.revokeProviderToken?.(providerName, credential.token, providerName === "github" ? { clientId: deps.githubOAuthConfig.clientId, clientSecret: deps.githubOAuthConfig.clientSecret } : undefined);
+    const removed = await db.deleteIntegrationForOwner(workspaceId, providerName, integrationId, req.user!.id);
     if (!removed) return res.status(404).json({ error: "integration not found or is not owned by you" });
     await db.recordAuditEvent({ workspaceId, eventType: "integration.disconnected" as AuditEventType, actorType: "user", actorUserId: req.user!.id, actorName: req.user!.displayName, summary: `${req.user!.displayName} disconnected ${provider}`, metadata: { integration: provider } });
     res.status(204).end();

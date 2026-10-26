@@ -139,10 +139,9 @@ export function registerGithubTeamRoutes({ app, deps, requireRole, requirePermis
     res.json(await listTeamActivity(paramString(req.params.id), { hours: 24, limit: 20 }));
   });
 
-  // An Admin (or Editor with Manage workflows) takes over a workflow, for
-  // example when its owner left the workspace.
+  // Only an Admin may take over a workflow, for example when its owner left.
   app.post("/workspaces/:id/workflows/:workflowId/take-over", async (req: Request, res: Response) => {
-    if (!(await requirePermission(req, res, "manageWorkflows"))) return;
+    if (!(await requireRole(req, res, ["admin"]))) return;
     const workspaceId = paramString(req.params.id);
     const workflow = await db.setWorkflowOwner(workspaceId, paramString(req.params.workflowId), req.user!.id);
     if (!workflow) return res.status(404).json({ error: "Workflow not found." });
