@@ -63,6 +63,12 @@ try {
     ...process.env,
     DATABASE_URL: connectionString,
     INTEGRATION_ENCRYPTION_KEY: process.env.INTEGRATION_ENCRYPTION_KEY || randomBytes(32).toString("base64"),
+    // The disposable test database has one chat-server process. Do not inherit
+    // the production Postgres realtime bus (and its distributed agent-turn
+    // lock) from the Docker container: isolated tests must use local room
+    // state, otherwise a stale/parallel lock can make WebSocket tests wait for
+    // an agent reply that will never be started.
+    REALTIME_BUS: "memory",
   };
   // Apply the versioned migrations exactly as a deploy does, then run every
   // workspace's tests against that database.

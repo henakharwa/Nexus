@@ -92,13 +92,17 @@ async function waitFor<T>(check: () => T | undefined | null | false | Promise<T 
 
 /** Opens a socket as `user`, sends one GitHub agent message, and returns the agent's reply and every event seen. */
 async function githubTurn(user: TestUser, content: string, conversationId = ws.conversationId) {
-  const events: Array<{ type: string; message?: ChatMessage; action?: PendingAction; activity?: TeamActivity }> = [];
+  const events: Array<{ type: string; message?: ChatMessage; action?: PendingAction; activity?: TeamActivity; error?: string }> = [];
   const socket = new WebSocket(`ws://localhost:${port}/ws?workspaceId=${ws.id}&conversationId=${conversationId}`, { headers: { Cookie: user.cookie, Origin: "http://localhost:3000" } });
   socket.on("message", (data) => events.push(JSON.parse(data.toString())));
   await new Promise((resolve) => socket.on("open", resolve));
   await waitFor(() => events.some((event) => event.type === "presence"));
   socket.send(JSON.stringify({ type: "chat", content, agentKind: "github" }));
-  const reply = await waitFor(() => events.find((event) => event.type === "message" && event.message?.role === "agent")?.message);
+  const reply = await waitFor(() => {
+    const error = events.find((event) => event.type === "error")?.error;
+    if (error) throw new Error(`GitHub agent turn was rejected: ${error}`);
+    return events.find((event) => event.type === "message" && event.message?.role === "agent")?.message;
+  });
   await waitFor(() => events.some((event) => event.type === "agent_status" && (event as { status?: string }).status === "idle"));
   socket.close();
   return { reply, events };
