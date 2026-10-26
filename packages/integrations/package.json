@@ -12,10 +12,10 @@
   "dependencies": {
     "@mai-chat/shared-types": "0.1.0",
     "@octokit/rest": "22.0.1",
-    "@slack/web-api": "8.1.1"
+    "@slack/web-api": "8.2.0"
   },
   "devDependencies": {
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.5",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
   }
