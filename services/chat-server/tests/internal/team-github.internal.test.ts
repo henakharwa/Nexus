@@ -93,10 +93,17 @@ async function waitFor<T>(check: () => T | undefined | null | false | Promise<T 
 /** Opens a socket as `user`, sends one GitHub agent message, and returns the agent's reply and every event seen. */
 async function githubTurn(user: TestUser, content: string, conversationId = ws.conversationId) {
   const events: Array<{ type: string; message?: ChatMessage; action?: PendingAction; activity?: TeamActivity; error?: string }> = [];
+  let closeReason: string | undefined;
   const socket = new WebSocket(`ws://localhost:${port}/ws?workspaceId=${ws.id}&conversationId=${conversationId}`, { headers: { Cookie: user.cookie, Origin: "http://localhost:3000" } });
   socket.on("message", (data) => events.push(JSON.parse(data.toString())));
+  socket.on("close", (code, reason) => {
+    closeReason = `WebSocket closed (${code})${reason.length ? `: ${reason.toString()}` : ""}`;
+  });
   await new Promise((resolve) => socket.on("open", resolve));
-  await waitFor(() => events.some((event) => event.type === "presence"));
+  await waitFor(() => {
+    if (closeReason) throw new Error(closeReason);
+    return events.some((event) => event.type === "presence");
+  });
   socket.send(JSON.stringify({ type: "chat", content, agentKind: "github" }));
   const reply = await waitFor(() => {
     const error = events.find((event) => event.type === "error")?.error;

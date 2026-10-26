@@ -69,6 +69,11 @@ try {
     // state, otherwise a stale/parallel lock can make WebSocket tests wait for
     // an agent reply that will never be started.
     REALTIME_BUS: "memory",
+    // Test WebSocket clients run on localhost. Keeping the deployed public
+    // URL here makes the origin guard close those sockets before their first
+    // presence event, which turns one rejected connection into many opaque
+    // timeouts in the integration suite.
+    WEB_APP_URL: "http://localhost:3000",
   };
   // Apply the versioned migrations exactly as a deploy does, then run every
   // workspace's tests against that database.
