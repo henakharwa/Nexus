@@ -17,6 +17,12 @@ import { describeActionTarget, findActionWarnings, scopeQueryToRepo, summarizeGi
 import { setupDatabase, makeUser, makeDeps, makeWorkspace, grantEditor, type TestUser } from "./helpers.js";
 
 type ToolCall = { tool: string; args: Record<string, unknown>; token: string };
+// This file exercises a real HTTP server, WebSockets and Postgres-backed
+// background workflows. Five seconds is routinely enough on a laptop but
+// not under Docker on the Oracle VM, where the workflow can legitimately
+// spend several seconds waiting for database scheduling. Keep the timeout
+// finite, but leave room for the real asynchronous path to settle.
+const ASYNC_INTEGRATION_TIMEOUT_MS = 20_000;
 const toolCalls: ToolCall[] = [];
 const factoryCalls: Array<{ token: string; accountKey?: string }> = [];
 
@@ -74,7 +80,7 @@ let ws: Awaited<ReturnType<typeof makeWorkspace>>;
 
 const result = (reply: string, toolCallsMade: number, proposedActionIds: string[] = []): RunAgentTurnResult => ({ reply, toolCallsMade, toolTrace: [], providerPromptTokens: 0, providerCompletionTokens: 0, providerCostUsd: null, proposedActionIds });
 
-async function waitFor<T>(check: () => T | undefined | null | false | Promise<T | undefined | null | false>, timeoutMs = 5000): Promise<T> {
+async function waitFor<T>(check: () => T | undefined | null | false | Promise<T | undefined | null | false>, timeoutMs = 15_000): Promise<T> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const value = await check();
@@ -137,7 +143,7 @@ beforeEach(() => {
   seenInputs.length = 0;
 });
 
-describe("TG-01 one repository per member, through their own account", () => {
+describe("TG-01 one repository per member, through their own account", { timeout: ASYNC_INTEGRATION_TIMEOUT_MS }, () => {
   it("works only in the member's chosen repository and refuses any other", async () => {
     const errors: string[] = [];
     script = async ({ tools }) => {
@@ -219,7 +225,7 @@ describe("TG-01 one repository per member, through their own account", () => {
   });
 });
 
-describe("TG-03 duplicate and conflict warnings", () => {
+describe("TG-03 duplicate and conflict warnings", { timeout: ASYNC_INTEGRATION_TIMEOUT_MS }, () => {
   it("flags a teammate's waiting change to the same issue and similar open issues", async () => {
     script = async ({ tools }) => {
       const comment = tools.find((tool) => tool.definition.function.name === "add_issue_comment")!;
@@ -263,7 +269,7 @@ describe("TG-03 duplicate and conflict warnings", () => {
   });
 });
 
-describe("TG-04 run-as rule", () => {
+describe("TG-04 run-as rule", { timeout: ASYNC_INTEGRATION_TIMEOUT_MS }, () => {
   it("runs as the requester, and offers Run as me when the requester's connection is gone", async () => {
     const pending = (await db.listActionsForConflictCheck(ws.id)).filter((action) => action.status === "pending");
     const stevensComment = pending.find((action) => action.requestedByUserId === stevens.id && action.toolName === "add_issue_comment")!;
@@ -314,7 +320,7 @@ describe("TG-04 run-as rule", () => {
   });
 });
 
-describe("TG-04b run-as across repositories", () => {
+describe("TG-04b run-as across repositories", { timeout: ASYNC_INTEGRATION_TIMEOUT_MS }, () => {
   it("doesn't offer Run as me to an approver who works in a different repository", async () => {
     script = async ({ tools }) => {
       const comment = tools.find((tool) => tool.definition.function.name === "add_issue_comment")!;
@@ -335,7 +341,7 @@ describe("TG-04b run-as across repositories", () => {
   });
 });
 
-describe("TG-05 GitHub webhooks and event triggers", () => {
+describe("TG-05 GitHub webhooks and event triggers", { timeout: ASYNC_INTEGRATION_TIMEOUT_MS }, () => {
   const issueOpened = (number: number, repo = "acme/web") =>
     JSON.stringify({ action: "opened", issue: { number, title: "Checkout button broken", html_url: `https://github.com/${repo}/issues/${number}`, body: "Steps to reproduce" }, repository: { full_name: repo }, sender: { login: "octocat", type: "User" } });
 
@@ -443,7 +449,7 @@ describe("TG-05 GitHub webhooks and event triggers", () => {
   });
 });
 
-describe("TG-06 team activity in the agent's context", () => {
+describe("TG-06 team activity in the agent's context", { timeout: ASYNC_INTEGRATION_TIMEOUT_MS }, () => {
   it("gives the GitHub agent recent teammate and GitHub activity", async () => {
     script = async () => result("Already handled.", 0);
     await githubTurn(admin, "Should I comment on #14?");
