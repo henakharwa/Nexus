@@ -171,7 +171,7 @@ export async function setArtifactShareToken(
   const result = await getPool().query(
     `UPDATE workspace_artifacts
      SET share_token=$3, share_expires_at=$4,
-         share_view_count=CASE WHEN $3 IS NULL THEN share_view_count ELSE 0 END
+         share_view_count=CASE WHEN $3::text IS NULL THEN share_view_count ELSE 0 END
      WHERE workspace_id=$1 AND id=$2 RETURNING id`,
     [workspaceId, artifactId, token, revoke ? null : expiresAt],
   );
