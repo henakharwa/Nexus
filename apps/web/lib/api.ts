@@ -703,10 +703,11 @@ export async function refreshWorkspaceDashboard(
 export async function shareWorkspaceArtifact(
   workspaceId: string,
   artifactId: string,
+  expiresInHours: 24 | 168 | 720 | null = null,
 ): Promise<import("@mai-chat/shared-types").WorkspaceArtifact> {
   const res = await authenticatedFetch(
     `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/share`,
-    { method: "POST" },
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expiresInHours }) },
   );
   return (await parseJsonOrThrow(res)) as import("@mai-chat/shared-types").WorkspaceArtifact;
 }

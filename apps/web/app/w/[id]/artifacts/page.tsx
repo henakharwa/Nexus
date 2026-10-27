@@ -152,6 +152,7 @@ export default function ArtifactsPage() {
   const [reportEditing, setReportEditing] = useState(false);
   const [planEditing, setPlanEditing] = useState(false);
   const [slackChannel, setSlackChannel] = useState("");
+  const [shareExpiryHours, setShareExpiryHours] = useState<24 | 168 | 720 | null>(168);
   const user = useWorkspaceUser();
   const access = useWorkspaceAccess(workspaceId);
   const dialog = useDialog();
@@ -338,10 +339,12 @@ export default function ArtifactsPage() {
     setSaving(true);
     setError("");
     try {
-      const shared = await shareWorkspaceArtifact(workspaceId, selected.id);
+      const shared = await shareWorkspaceArtifact(workspaceId, selected.id, shareExpiryHours);
       await refresh();
       await select(shared);
-      setNotice("Public link created. Anyone with the link can view this published artifact.");
+      setNotice(
+        `Public link created${shareExpiryHours ? ` for ${shareExpiryHours / 24} day${shareExpiryHours === 24 ? "" : "s"}` : " without an expiry"}. Anyone with the link can view this published artifact.`,
+      );
     } catch (err) {
       setError(describeError(err, "Could not create a public link."));
     } finally {
@@ -1047,8 +1050,10 @@ export default function ArtifactsPage() {
               artifact={selected}
               publicUrl={selected.shareToken ? publicUrl(selected) : ""}
               slackChannel={slackChannel}
+              shareExpiryHours={shareExpiryHours}
               saving={saving}
               onSlackChannelChange={setSlackChannel}
+              onShareExpiryHoursChange={setShareExpiryHours}
               onCreatePublicLink={() => void createPublicLink()}
               onCopyPublicLink={() => void copyPublicLink()}
               onRevokePublicLink={() => void revokePublicLink()}

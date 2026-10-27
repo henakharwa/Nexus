@@ -46,7 +46,7 @@ export default function PublicDashboardPage() {
   return (
     <main className="public-dashboard-page">
       <header>
-        <p className="eyebrow">{view.workspaceName} · SHARED DASHBOARD</p>
+        <p className="eyebrow">SHARED DASHBOARD</p>
         <h1>{view.title}</h1>
         {view.summary && <p>{view.summary}</p>}
       </header>

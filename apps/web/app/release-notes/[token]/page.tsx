@@ -44,9 +44,7 @@ export default function PublicReleaseNotesPage() {
   return (
     <main className="public-dashboard-page">
       <header>
-        <p className="eyebrow">
-          {view.workspaceName} · RELEASE NOTES{view.releaseVersion ? ` · ${view.releaseVersion}` : ""}
-        </p>
+        <p className="eyebrow">RELEASE NOTES{view.releaseVersion ? ` · ${view.releaseVersion}` : ""}</p>
         <h1>{view.title}</h1>
         {view.summary && <p>{view.summary}</p>}
       </header>

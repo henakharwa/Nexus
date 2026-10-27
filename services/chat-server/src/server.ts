@@ -682,13 +682,14 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     trigger: "manual" | "schedule" | "github_issue" | "github_status" | "slack_mention",
     user: { id: string | null; displayName: string },
     eventText?: string,
+    sourceRepository: string | null = null,
   ) => {
     // A workflow runs as its owner, through the owner's own connections. If
     // the owner has left the workspace, the run fails until someone takes
     // the workflow over.
     const role = user.id ? await db.getWorkspaceRole(workflow.workspaceId, user.id) : null;
     const actor = role ? user : { id: null, displayName: "Workflow automation" };
-    const run = await db.createWorkflowRunWithinQuota(workflow, trigger);
+    const run = await db.createWorkflowRunWithinQuota(workflow, trigger, sourceRepository);
     if (!run) {
       await db.recordAuditEvent({
         workspaceId: workflow.workspaceId,
@@ -696,7 +697,7 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
         actorType: "system",
         actorName: "Workflow automation",
         summary: `Workflow ${workflow.name} was not started because the hourly run limit was reached.`,
-        metadata: { workflowId: workflow.id, trigger, reason: "run_quota" },
+        metadata: { workflowId: workflow.id, trigger, sourceRepository, reason: "run_quota" },
       });
       return;
     }
@@ -848,6 +849,7 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
         summary.trigger,
         { id: owner?.id ?? null, displayName: owner?.displayName ?? "Workflow automation" },
         summary.eventText,
+        summary.repo,
       );
     }
   };
@@ -1255,14 +1257,12 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 0;
     if (clientStatus >= 400 && clientStatus < 500) {
       if (!res.headersSent)
-        res
-          .status(clientStatus)
-          .json({
-            error:
-              clientStatus === 413
-                ? "Request body is too large."
-                : "The request body could not be read. Send valid JSON.",
-          });
+        res.status(clientStatus).json({
+          error:
+            clientStatus === 413
+              ? "Request body is too large."
+              : "The request body could not be read. Send valid JSON.",
+        });
       return;
     }
     console.error(

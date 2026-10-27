@@ -1,5 +1,11 @@
 {$NEXUS_DOMAIN} {
   encode zstd gzip
+  @publicShares path /dashboard/* /release-notes/* /shared/*
+  header @publicShares {
+    Cache-Control "private, no-store, max-age=0"
+    Pragma "no-cache"
+    X-Robots-Tag "noindex, nofollow, noarchive"
+  }
   handle_path /api/* {
     reverse_proxy 127.0.0.1:4000
   }

@@ -63,9 +63,7 @@ export default function PublicArtifactPage() {
   return (
     <main className="public-dashboard-page">
       <header>
-        <p className="eyebrow">
-          {view.workspaceName} · {typeLabel[view.type]}
-        </p>
+        <p className="eyebrow">{typeLabel[view.type]}</p>
         <h1>{view.title}</h1>
         {view.summary && <p>{view.summary}</p>}
         {progress && progress.total > 0 && (

@@ -4,7 +4,14 @@ import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
-import { getPool, closePool, upsertUserFromGithub, createSession, addWorkspaceMember, upsertSlackIntegration } from "@mai-chat/db";
+import {
+  getPool,
+  closePool,
+  upsertUserFromGithub,
+  createSession,
+  addWorkspaceMember,
+  upsertSlackIntegration,
+} from "@mai-chat/db";
 import { createChatServer, type CreateServerDeps } from "../src/server.js";
 import type { GithubClient, SlackClient } from "@mai-chat/integrations";
 
@@ -24,7 +31,11 @@ const fakeGithubClient: GithubClient = {
   listIssues: async () => [],
   listPullRequests: async () => [],
 };
-const fakeSlackClient: SlackClient = { postMessage: async (channel, text) => { postedMessages.push({ channel, text }); } };
+const fakeSlackClient: SlackClient = {
+  postMessage: async (channel, text) => {
+    postedMessages.push({ channel, text });
+  },
+};
 
 function makeDeps(overrides: Partial<CreateServerDeps> = {}): CreateServerDeps {
   return {
@@ -34,7 +45,10 @@ function makeDeps(overrides: Partial<CreateServerDeps> = {}): CreateServerDeps {
     slackMcpToolsFactory: async () => [],
     runAgentTurn: async () => ({ reply: "Agent reply", toolCallsMade: 0 }),
     githubOAuthConfig: { clientId: "", clientSecret: "", redirectUri: "", webAppUrl: "http://localhost:3000" },
-    githubOAuthDeps: { exchangeCodeForToken: async () => ({ error: "unused" }), listRepositoriesForToken: async () => [] },
+    githubOAuthDeps: {
+      exchangeCodeForToken: async () => ({ error: "unused" }),
+      listRepositoriesForToken: async () => [],
+    },
     slackOAuthConfig: { clientId: "", clientSecret: "", redirectUri: "", webAppUrl: "http://localhost:3000" },
     slackOAuthDeps: { exchangeCodeForToken: async () => ({ error: "unused" }) },
     ...overrides,
@@ -49,19 +63,36 @@ let outsiderCookie: string;
 
 beforeAll(async () => {
   await runMigrations();
-  const owner = await upsertUserFromGithub({ githubId: `artifacts-owner-${randomUUID()}`, username: "artifacts-owner", displayName: "Artifacts Owner" });
+  const owner = await upsertUserFromGithub({
+    githubId: `artifacts-owner-${randomUUID()}`,
+    username: "artifacts-owner",
+    displayName: "Artifacts Owner",
+  });
   ownerId = owner.id;
   ownerCookie = `mai_session=${(await createSession(owner.id, 60_000)).token}`;
-  const editor = await upsertUserFromGithub({ githubId: `artifacts-editor-${randomUUID()}`, username: "artifacts-editor", displayName: "Artifacts Editor" });
+  const editor = await upsertUserFromGithub({
+    githubId: `artifacts-editor-${randomUUID()}`,
+    username: "artifacts-editor",
+    displayName: "Artifacts Editor",
+  });
   editorId = editor.id;
   editorCookie = `mai_session=${(await createSession(editor.id, 60_000)).token}`;
-  const outsider = await upsertUserFromGithub({ githubId: `artifacts-outsider-${randomUUID()}`, username: "artifacts-outsider", displayName: "Artifacts Outsider" });
+  const outsider = await upsertUserFromGithub({
+    githubId: `artifacts-outsider-${randomUUID()}`,
+    username: "artifacts-outsider",
+    displayName: "Artifacts Outsider",
+  });
   outsiderCookie = `mai_session=${(await createSession(outsider.id, 60_000)).token}`;
 });
-afterAll(async () => { await closePool(); });
+afterAll(async () => {
+  await closePool();
+});
 
 async function makeWorkspace(app: import("express").Express) {
-  const created = await request(app).post("/workspaces").set("Cookie", ownerCookie).send({ name: `Artifacts WS ${randomUUID()}` });
+  const created = await request(app)
+    .post("/workspaces")
+    .set("Cookie", ownerCookie)
+    .send({ name: `Artifacts WS ${randomUUID()}` });
   await addWorkspaceMember(created.body.id, editorId, "editor");
   return created.body as { id: string; name: string };
 }
@@ -71,8 +102,13 @@ describe("artifacts: CRUD and permissions", () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
 
-    const create = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
-      .send({ type: "plan", status: "draft", title: "Launch plan", summary: "Goals and milestones", content: "## Goal\n\n## Next step" });
+    const create = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie).send({
+      type: "plan",
+      status: "draft",
+      title: "Launch plan",
+      summary: "Goals and milestones",
+      content: "## Goal\n\n## Next step",
+    });
     expect(create.status).toBe(201);
     expect(create.body).toMatchObject({ type: "plan", status: "draft", title: "Launch plan" });
     const artifactId = create.body.id as string;
@@ -81,13 +117,23 @@ describe("artifacts: CRUD and permissions", () => {
     expect(list.status).toBe(200);
     expect(list.body.map((item: { id: string }) => item.id)).toContain(artifactId);
 
-    const update = await request(app).patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`).set("Cookie", ownerCookie)
-      .send({ type: "plan", status: "published", title: "Launch plan", summary: "Goals and milestones", content: "## Goal\n\nShip it\n\n## Next step" });
+    const update = await request(app)
+      .patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`)
+      .set("Cookie", ownerCookie)
+      .send({
+        type: "plan",
+        status: "published",
+        title: "Launch plan",
+        summary: "Goals and milestones",
+        content: "## Goal\n\nShip it\n\n## Next step",
+      });
     expect(update.status).toBe(200);
     expect(update.body.status).toBe("published");
     expect(update.body.content).toContain("Ship it");
 
-    const del = await request(app).delete(`/workspaces/${workspace.id}/artifacts/${artifactId}`).set("Cookie", ownerCookie);
+    const del = await request(app)
+      .delete(`/workspaces/${workspace.id}/artifacts/${artifactId}`)
+      .set("Cookie", ownerCookie);
     expect(del.status).toBe(204);
     const listAfter = await request(app).get(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie);
     expect(listAfter.body.map((item: { id: string }) => item.id)).not.toContain(artifactId);
@@ -96,27 +142,38 @@ describe("artifacts: CRUD and permissions", () => {
   it("rejects a missing title or content on create", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const res = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie).send({ type: "plan", status: "draft", title: "", summary: "", content: "" });
+    const res = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
+      .send({ type: "plan", status: "draft", title: "", summary: "", content: "" });
     expect(res.status).toBe(400);
   });
 
   it("blocks a non-author editor from editing or deleting someone else's artifact, but not an admin", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const create = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const create = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "report", status: "draft", title: "Weekly update", summary: "", content: "## Progress" });
     const artifactId = create.body.id as string;
 
-    const editorUpdate = await request(app).patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`).set("Cookie", editorCookie)
+    const editorUpdate = await request(app)
+      .patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`)
+      .set("Cookie", editorCookie)
       .send({ type: "report", status: "draft", title: "Hijacked", summary: "", content: "## Progress" });
     expect(editorUpdate.status).toBe(403);
 
-    const editorDelete = await request(app).delete(`/workspaces/${workspace.id}/artifacts/${artifactId}`).set("Cookie", editorCookie);
+    const editorDelete = await request(app)
+      .delete(`/workspaces/${workspace.id}/artifacts/${artifactId}`)
+      .set("Cookie", editorCookie);
     expect(editorDelete.status).toBe(403);
 
     // The workspace creator is its first admin (see POST /workspaces),
     // so the owner's own cookie doubles as the admin case here.
-    const adminUpdate = await request(app).patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`).set("Cookie", ownerCookie)
+    const adminUpdate = await request(app)
+      .patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`)
+      .set("Cookie", ownerCookie)
       .send({ type: "report", status: "draft", title: "Admin edited", summary: "", content: "## Progress" });
     expect(adminUpdate.status).toBe(200);
   });
@@ -131,8 +188,14 @@ describe("artifacts: CRUD and permissions", () => {
   it("requires the owner to be an actual workspace member", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const res = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
-      .send({ type: "plan", status: "draft", title: "Plan", summary: "", content: "content", ownerUserId: randomUUID() });
+    const res = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie).send({
+      type: "plan",
+      status: "draft",
+      title: "Plan",
+      summary: "",
+      content: "content",
+      ownerUserId: randomUUID(),
+    });
     expect(res.status).toBe(400);
   });
 });
@@ -141,20 +204,28 @@ describe("artifacts: version history", () => {
   it("records a version on every save and can restore an earlier one", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const create = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const create = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "plan", status: "draft", title: "v1 title", summary: "", content: "v1 content" });
     const artifactId = create.body.id as string;
 
-    await request(app).patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`).set("Cookie", ownerCookie)
+    await request(app)
+      .patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`)
+      .set("Cookie", ownerCookie)
       .send({ type: "plan", status: "draft", title: "v2 title", summary: "", content: "v2 content" });
 
-    const versions = await request(app).get(`/workspaces/${workspace.id}/artifacts/${artifactId}/versions`).set("Cookie", ownerCookie);
+    const versions = await request(app)
+      .get(`/workspaces/${workspace.id}/artifacts/${artifactId}/versions`)
+      .set("Cookie", ownerCookie);
     expect(versions.status).toBe(200);
     expect(versions.body.length).toBeGreaterThanOrEqual(2);
     const firstVersion = versions.body[versions.body.length - 1];
     expect(firstVersion.title).toBe("v1 title");
 
-    const restore = await request(app).post(`/workspaces/${workspace.id}/artifacts/${artifactId}/versions/${firstVersion.id}/restore`).set("Cookie", ownerCookie);
+    const restore = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${artifactId}/versions/${firstVersion.id}/restore`)
+      .set("Cookie", ownerCookie);
     expect(restore.status).toBe(200);
     expect(restore.body.title).toBe("v1 title");
     expect(restore.body.content).toBe("v1 content");
@@ -165,19 +236,29 @@ describe("artifacts: comments", () => {
   it("lets a workspace editor comment, and rejects an empty comment", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const create = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const create = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "plan", status: "draft", title: "Plan", summary: "", content: "content" });
     const artifactId = create.body.id as string;
 
-    const comment = await request(app).post(`/workspaces/${workspace.id}/artifacts/${artifactId}/comments`).set("Cookie", editorCookie).send({ content: "Looks good" });
+    const comment = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${artifactId}/comments`)
+      .set("Cookie", editorCookie)
+      .send({ content: "Looks good" });
     expect(comment.status).toBe(201);
     expect(comment.body.content).toBe("Looks good");
     expect(comment.body.authorName).toBe("Artifacts Editor");
 
-    const empty = await request(app).post(`/workspaces/${workspace.id}/artifacts/${artifactId}/comments`).set("Cookie", editorCookie).send({ content: "   " });
+    const empty = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${artifactId}/comments`)
+      .set("Cookie", editorCookie)
+      .send({ content: "   " });
     expect(empty.status).toBe(400);
 
-    const list = await request(app).get(`/workspaces/${workspace.id}/artifacts/${artifactId}/comments`).set("Cookie", ownerCookie);
+    const list = await request(app)
+      .get(`/workspaces/${workspace.id}/artifacts/${artifactId}/comments`)
+      .set("Cookie", ownerCookie);
     expect(list.status).toBe(200);
     expect(list.body).toHaveLength(1);
   });
@@ -188,14 +269,22 @@ describe("artifacts: dashboard", () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
 
-    const plan = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const plan = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "plan", status: "draft", title: "Plan", summary: "", content: "content" });
-    const wrongType = await request(app).post(`/workspaces/${workspace.id}/artifacts/${plan.body.id}/refresh-dashboard`).set("Cookie", ownerCookie);
+    const wrongType = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${plan.body.id}/refresh-dashboard`)
+      .set("Cookie", ownerCookie);
     expect(wrongType.status).toBe(400);
 
-    const dashboard = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const dashboard = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "dashboard", status: "draft", title: "Health", summary: "", content: "auto-generated" });
-    const refreshed = await request(app).post(`/workspaces/${workspace.id}/artifacts/${dashboard.body.id}/refresh-dashboard`).set("Cookie", ownerCookie);
+    const refreshed = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${dashboard.body.id}/refresh-dashboard`)
+      .set("Cookie", ownerCookie);
     expect(refreshed.status).toBe(200);
     expect(refreshed.body.dashboardData).toBeTruthy();
     expect(refreshed.body.dashboardData.health).toMatch(/on_track|at_risk|off_track/);
@@ -208,18 +297,26 @@ describe("artifacts: dashboard", () => {
   it("tracks live presence heartbeats, excluding the caller from their own viewer list", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const dashboard = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const dashboard = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "dashboard", status: "draft", title: "Health", summary: "", content: "auto-generated" });
     const artifactId = dashboard.body.id as string;
 
-    const ownerPing = await request(app).post(`/workspaces/${workspace.id}/artifacts/${artifactId}/presence`).set("Cookie", ownerCookie);
+    const ownerPing = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${artifactId}/presence`)
+      .set("Cookie", ownerCookie);
     expect(ownerPing.status).toBe(200);
     expect(ownerPing.body.viewers).toEqual([]);
 
-    const editorPing = await request(app).post(`/workspaces/${workspace.id}/artifacts/${artifactId}/presence`).set("Cookie", editorCookie);
+    const editorPing = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${artifactId}/presence`)
+      .set("Cookie", editorCookie);
     expect(editorPing.body.viewers.map((v: { name: string }) => v.name)).toEqual(["Artifacts Owner"]);
 
-    const ownerPingAgain = await request(app).post(`/workspaces/${workspace.id}/artifacts/${artifactId}/presence`).set("Cookie", ownerCookie);
+    const ownerPingAgain = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${artifactId}/presence`)
+      .set("Cookie", ownerCookie);
     expect(ownerPingAgain.body.viewers.map((v: { name: string }) => v.name)).toEqual(["Artifacts Editor"]);
   });
 });
@@ -228,14 +325,22 @@ describe("artifacts: generate from activity", () => {
   it("drafts release notes from GitHub activity, gated to the release_notes type", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const plan = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const plan = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "plan", status: "draft", title: "Plan", summary: "", content: "content" });
-    const wrongType = await request(app).post(`/workspaces/${workspace.id}/artifacts/${plan.body.id}/generate-release-notes`).set("Cookie", ownerCookie);
+    const wrongType = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${plan.body.id}/generate-release-notes`)
+      .set("Cookie", ownerCookie);
     expect(wrongType.status).toBe(400);
 
-    const releaseNotes = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const releaseNotes = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "release_notes", status: "draft", title: "v1.0", summary: "", content: "## Highlights" });
-    const generated = await request(app).post(`/workspaces/${workspace.id}/artifacts/${releaseNotes.body.id}/generate-release-notes`).set("Cookie", ownerCookie);
+    const generated = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${releaseNotes.body.id}/generate-release-notes`)
+      .set("Cookie", ownerCookie);
     expect(generated.status).toBe(200);
     expect(generated.body.content).toContain("## Highlights");
   });
@@ -243,14 +348,22 @@ describe("artifacts: generate from activity", () => {
   it("drafts a report from workspace activity, gated to the report type", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const plan = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const plan = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "plan", status: "draft", title: "Plan", summary: "", content: "content" });
-    const wrongType = await request(app).post(`/workspaces/${workspace.id}/artifacts/${plan.body.id}/generate-report`).set("Cookie", ownerCookie);
+    const wrongType = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${plan.body.id}/generate-report`)
+      .set("Cookie", ownerCookie);
     expect(wrongType.status).toBe(400);
 
-    const report = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const report = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "report", status: "draft", title: "Weekly update", summary: "", content: "## Progress" });
-    const generated = await request(app).post(`/workspaces/${workspace.id}/artifacts/${report.body.id}/generate-report`).set("Cookie", ownerCookie);
+    const generated = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${report.body.id}/generate-report`)
+      .set("Cookie", ownerCookie);
     expect(generated.status).toBe(200);
     expect(generated.body.content).toContain("## Progress");
     expect(generated.body.content).toContain("## Risks");
@@ -262,11 +375,15 @@ describe("artifacts: share links and public views", () => {
   it("creates and revokes a public link for a dashboard, serving the safe view only while published", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const dashboard = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const dashboard = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "dashboard", status: "published", title: "Health", summary: "", content: "auto-generated" });
     const artifactId = dashboard.body.id as string;
 
-    const shared = await request(app).post(`/workspaces/${workspace.id}/artifacts/${artifactId}/share`).set("Cookie", ownerCookie);
+    const shared = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${artifactId}/share`)
+      .set("Cookie", ownerCookie);
     expect(shared.status).toBe(200);
     expect(shared.body.shareToken).toBeTruthy();
 
@@ -274,8 +391,13 @@ describe("artifacts: share links and public views", () => {
     expect(publicView.status).toBe(200);
     expect(publicView.body.title).toBe("Health");
     expect(publicView.body).not.toHaveProperty("content"); // safe view only
+    expect(publicView.body).not.toHaveProperty("workspaceName");
+    expect(publicView.headers["cache-control"]).toContain("no-store");
+    expect(publicView.headers["x-robots-tag"]).toContain("noindex");
 
-    const revoked = await request(app).delete(`/workspaces/${workspace.id}/artifacts/${artifactId}/share`).set("Cookie", ownerCookie);
+    const revoked = await request(app)
+      .delete(`/workspaces/${workspace.id}/artifacts/${artifactId}/share`)
+      .set("Cookie", ownerCookie);
     expect(revoked.status).toBe(200);
     expect(revoked.body.shareToken).toBeNull();
 
@@ -286,11 +408,18 @@ describe("artifacts: share links and public views", () => {
   it("shares a plan/report/task_list artifact through the generic public route, only once published", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const plan = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
-      .send({ type: "plan", status: "draft", title: "Launch plan", summary: "Team plan", content: "- [x] Confirm owner\n- [ ] Ship it" });
+    const plan = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie).send({
+      type: "plan",
+      status: "draft",
+      title: "Launch plan",
+      summary: "Team plan",
+      content: "- [x] Confirm owner\n- [ ] Ship it",
+    });
     const artifactId = plan.body.id as string;
 
-    const shared = await request(app).post(`/workspaces/${workspace.id}/artifacts/${artifactId}/share`).set("Cookie", ownerCookie);
+    const shared = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${artifactId}/share`)
+      .set("Cookie", ownerCookie);
     expect(shared.status).toBe(200);
     const token = shared.body.shareToken as string;
 
@@ -299,13 +428,45 @@ describe("artifacts: share links and public views", () => {
     const whileDraft = await request(app).get(`/public/artifacts/${token}`);
     expect(whileDraft.status).toBe(404);
 
-    await request(app).patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`).set("Cookie", ownerCookie)
-      .send({ type: "plan", status: "published", title: "Launch plan", summary: "Team plan", content: "- [x] Confirm owner\n- [ ] Ship it" });
+    await request(app).patch(`/workspaces/${workspace.id}/artifacts/${artifactId}`).set("Cookie", ownerCookie).send({
+      type: "plan",
+      status: "published",
+      title: "Launch plan",
+      summary: "Team plan",
+      content: "- [x] Confirm owner\n- [ ] Ship it",
+    });
 
     const published = await request(app).get(`/public/artifacts/${token}`);
     expect(published.status).toBe(200);
     expect(published.body).toMatchObject({ type: "plan", title: "Launch plan", summary: "Team plan" });
     expect(published.body.content).toContain("Ship it");
+    expect(published.body).not.toHaveProperty("workspaceName");
+  });
+
+  it("expires public links when requested and counts only successful views", async () => {
+    const { app } = createChatServer(makeDeps());
+    const workspace = await makeWorkspace(app);
+    const plan = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
+      .send({ type: "plan", status: "published", title: "Expiring plan", summary: "", content: "safe public content" });
+    const shared = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${plan.body.id}/share`)
+      .set("Cookie", ownerCookie)
+      .send({ expiresInHours: 24 });
+    expect(shared.status).toBe(200);
+    expect(shared.body.shareExpiresAt).toBeTruthy();
+    expect(shared.body.shareViewCount).toBe(0);
+
+    expect((await request(app).get(`/public/artifacts/${shared.body.shareToken}`)).status).toBe(200);
+    const listed = await request(app).get(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie);
+    expect(listed.body.find((artifact: { id: string }) => artifact.id === plan.body.id)).toMatchObject({
+      shareViewCount: 1,
+    });
+
+    const expired = await db.setArtifactShareToken(workspace.id, plan.body.id, false, new Date(Date.now() - 1_000));
+    expect(expired?.shareToken).toBeTruthy();
+    expect((await request(app).get(`/public/artifacts/${expired!.shareToken}`)).status).toBe(404);
   });
 
   it("returns 404 for an unknown or malformed share token on every public route", async () => {
@@ -319,9 +480,13 @@ describe("artifacts: share links and public views", () => {
   it("only lets the author or an admin create or revoke a share link", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const plan = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const plan = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "plan", status: "draft", title: "Plan", summary: "", content: "content" });
-    const res = await request(app).post(`/workspaces/${workspace.id}/artifacts/${plan.body.id}/share`).set("Cookie", editorCookie);
+    const res = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${plan.body.id}/share`)
+      .set("Cookie", editorCookie);
     expect(res.status).toBe(403);
   });
 });
@@ -331,12 +496,25 @@ describe("artifacts: share to Slack", () => {
     postedMessages = [];
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    await upsertSlackIntegration({ workspaceId: workspace.id, teamName: "Artifacts QA", token: "xoxp-fake", ownerUserId: ownerId });
+    await upsertSlackIntegration({
+      workspaceId: workspace.id,
+      teamName: "Artifacts QA",
+      token: "xoxp-fake",
+      ownerUserId: ownerId,
+    });
 
-    const report = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
-      .send({ type: "report", status: "published", title: "Weekly update", summary: "", content: "## Progress\n\nShipped the thing" });
+    const report = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie).send({
+      type: "report",
+      status: "published",
+      title: "Weekly update",
+      summary: "",
+      content: "## Progress\n\nShipped the thing",
+    });
 
-    const shared = await request(app).post(`/workspaces/${workspace.id}/artifacts/${report.body.id}/share-to-slack`).set("Cookie", ownerCookie).send({ channel: "team-updates" });
+    const shared = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${report.body.id}/share-to-slack`)
+      .set("Cookie", ownerCookie)
+      .send({ channel: "team-updates" });
     expect(shared.status).toBe(204);
     expect(postedMessages).toHaveLength(1);
     expect(postedMessages[0].channel).toBe("team-updates");
@@ -355,13 +533,21 @@ describe("artifacts: share to Slack", () => {
   it("requires a channel and a connected Slack integration", async () => {
     const { app } = createChatServer(makeDeps());
     const workspace = await makeWorkspace(app);
-    const report = await request(app).post(`/workspaces/${workspace.id}/artifacts`).set("Cookie", ownerCookie)
+    const report = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts`)
+      .set("Cookie", ownerCookie)
       .send({ type: "report", status: "draft", title: "Weekly update", summary: "", content: "## Progress" });
 
-    const noChannel = await request(app).post(`/workspaces/${workspace.id}/artifacts/${report.body.id}/share-to-slack`).set("Cookie", ownerCookie).send({});
+    const noChannel = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${report.body.id}/share-to-slack`)
+      .set("Cookie", ownerCookie)
+      .send({});
     expect(noChannel.status).toBe(400);
 
-    const notConnected = await request(app).post(`/workspaces/${workspace.id}/artifacts/${report.body.id}/share-to-slack`).set("Cookie", ownerCookie).send({ channel: "team-updates" });
+    const notConnected = await request(app)
+      .post(`/workspaces/${workspace.id}/artifacts/${report.body.id}/share-to-slack`)
+      .set("Cookie", ownerCookie)
+      .send({ channel: "team-updates" });
     expect(notConnected.status).toBe(400);
   });
 });

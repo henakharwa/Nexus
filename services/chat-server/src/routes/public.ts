@@ -5,6 +5,14 @@ import type { Request, Response } from "express";
 import type { RouteContext } from "./context.js";
 
 export function registerPublicRoutes({ app }: RouteContext): void {
+  // Public links are bearer URLs. Do not let browsers, shared proxies, or
+  // search engines retain a copy after the link has been revoked or expired.
+  const protectPublicResponse = (res: Response) =>
+    res.set({
+      "Cache-Control": "private, no-store, max-age=0",
+      Pragma: "no-cache",
+      "X-Robots-Tag": "noindex, nofollow, noarchive",
+    });
   // Liveness proves the process can answer HTTP; readiness also proves its
   // required datastore is reachable. Neither endpoint leaks configuration.
   app.get("/healthz", (_req: Request, res: Response) => res.json({ ok: true, service: "chat-server" }));
@@ -14,6 +22,7 @@ export function registerPublicRoutes({ app }: RouteContext): void {
   // (see PublicDashboardView); never the full artifact, and only while
   // the dashboard is published and a share link is still active.
   app.get("/public/dashboards/:token", async (req: Request, res: Response) => {
+    protectPublicResponse(res);
     const token = paramString(req.params.token);
     if (!token) return res.status(404).json({ error: "not found" });
     const view = await db.getPublicDashboardByShareToken(token);
@@ -22,6 +31,7 @@ export function registerPublicRoutes({ app }: RouteContext): void {
   });
 
   app.get("/public/release-notes/:token", async (req: Request, res: Response) => {
+    protectPublicResponse(res);
     const token = paramString(req.params.token);
     if (!token) return res.status(404).json({ error: "not found" });
     const view = await db.getPublicReleaseNotesByShareToken(token);
@@ -34,6 +44,7 @@ export function registerPublicRoutes({ app }: RouteContext): void {
   // of a type-specific one -- see PublicArtifactView and
   // getPublicArtifactByShareToken's own type filter.
   app.get("/public/artifacts/:token", async (req: Request, res: Response) => {
+    protectPublicResponse(res);
     const token = paramString(req.params.token);
     if (!token) return res.status(404).json({ error: "not found" });
     const view = await db.getPublicArtifactByShareToken(token);

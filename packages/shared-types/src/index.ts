@@ -334,6 +334,11 @@ export interface WorkspaceArtifact {
   // artifact (dashboard or release_notes) -- see server.ts's POST/DELETE
   // .../share.
   shareToken: string | null;
+  // Null means the active share link does not expire. This information is
+  // visible only to workspace members, never through a public link.
+  shareExpiresAt: string | null;
+  // Total successful public-link views for the active token.
+  shareViewCount: number;
   // Release Notes only (null for every other type) -- a free-form tag
   // like "v1.2.0" or "Sprint 14" so one release note has a clear
   // boundary from the next.
@@ -352,7 +357,6 @@ export interface WorkspaceArtifact {
 export interface PublicDashboardView {
   title: string;
   summary: string;
-  workspaceName: string;
   dashboardData: WorkspaceArtifactDashboard;
   updatedAt: string;
 }
@@ -362,7 +366,6 @@ export interface PublicDashboardView {
 export interface PublicReleaseNotesView {
   title: string;
   summary: string;
-  workspaceName: string;
   content: string;
   releaseVersion: string | null;
   updatedAt: string;
@@ -377,7 +380,6 @@ export interface PublicArtifactView {
   type: WorkspaceArtifactType;
   title: string;
   summary: string;
-  workspaceName: string;
   content: string;
   updatedAt: string;
 }

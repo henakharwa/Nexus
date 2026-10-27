@@ -91,6 +91,7 @@ export {
   listWorkspaceWorkflows,
   getWorkspaceWorkflow,
   createWorkspaceWorkflow,
+  githubWorkflowRunsPerRepositoryPerHour,
   updateWorkspaceWorkflow,
   deleteWorkspaceWorkflow,
   setWorkflowConversation,
