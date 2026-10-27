@@ -880,7 +880,11 @@ export default function WorkflowsPage() {
               </button>
             )}
             {selected && (
-              <button className="agent-delete-button" disabled={saving || !canModifyWorkflow} onClick={() => void remove()}>
+              <button
+                className="agent-delete-button"
+                disabled={saving || !canModifyWorkflow}
+                onClick={() => void remove()}
+              >
                 Delete
               </button>
             )}
