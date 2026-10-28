@@ -113,7 +113,7 @@ export {
   listWorkspaceWorkflowRuns,
   claimDueWorkflows,
 } from "./workflows.js";
-export { listWorkspaceTasks, createWorkspaceTask, updateWorkspaceTask, deleteWorkspaceTask } from "./tasks.js";
+export { listWorkspaceTasks, getWorkspaceTask, createWorkspaceTask, updateWorkspaceTask, deleteWorkspaceTask } from "./tasks.js";
 export {
   listWorkspaceMemory,
   createWorkspaceMemory,
@@ -122,7 +122,14 @@ export {
   deleteWorkspaceMemory,
   workspaceMemoryContext,
   formatWorkspaceMemoryContext,
+  listMemoryProposals,
+  getMemoryProposal,
+  countPendingMemoryProposals,
+  createMemoryProposal,
+  reviewMemoryProposal,
+  withdrawMemoryProposal,
 } from "./memory.js";
+export type { MemoryChangeInput, CreateMemoryProposalResult, ReviewMemoryProposalResult } from "./memory.js";
 export {
   listWorkspaceArtifacts,
   getWorkspaceArtifact,

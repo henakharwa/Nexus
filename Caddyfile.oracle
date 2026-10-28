@@ -1,5 +1,22 @@
 {$NEXUS_DOMAIN} {
   encode zstd gzip
+
+  # Browser security headers for everything served on this domain
+  # (Security Validation scope 12). The web app and API set these headers
+  # themselves; a "?" header is only filled in when the upstream left it out,
+  # so the web app's per-request nonce CSP is never overwritten. HSTS and
+  # removing the Server banner always apply here at the TLS edge.
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    -Server
+    -X-Powered-By
+    ?X-Content-Type-Options "nosniff"
+    ?X-Frame-Options "DENY"
+    ?Referrer-Policy "strict-origin-when-cross-origin"
+    ?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), interest-cohort=()"
+    ?Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+  }
+
   @publicShares path /dashboard/* /release-notes/* /shared/*
   header @publicShares {
     Cache-Control "private, no-store, max-age=0"

@@ -4,15 +4,17 @@ import Link from "next/link";
 import { useDialog } from "../../../_components/DialogProvider";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { WorkspaceMemory } from "@mai-chat/shared-types";
+import type { WorkspaceMemory, WorkspaceMemoryProposal } from "@mai-chat/shared-types";
 import {
   describeError,
   createWorkspaceMemory,
   deleteWorkspaceMemory,
+  listMemoryProposals,
   listWorkspaceMemory,
   updateWorkspaceMemory,
   type WorkspaceMemoryInput,
 } from "../../../../lib/api";
+import { MemoryReviewQueue } from "./MemoryReviewQueue";
 import { missingRequiredFields } from "../../../../lib/builder-validation";
 import { AccessNotice } from "../../../_components/AccessNotice";
 import { useWorkspaceAccess } from "../../../../lib/useWorkspaceAccess";
@@ -52,13 +54,22 @@ export default function MemoryPage() {
   const dialog = useDialog();
   const access = useWorkspaceAccess(workspaceId);
   const canChange = access.can("manageMemory");
-  const refresh = async () => setMemories(await listWorkspaceMemory(workspaceId));
+  // Only Admins change memory directly; other members' changes are reviewed.
+  const reviewed = !access.isAdmin;
+  const [proposals, setProposals] = useState<WorkspaceMemoryProposal[]>([]);
+  const refreshProposals = async () => setProposals(await listMemoryProposals(workspaceId));
+  const refresh = async () => {
+    const [entries] = await Promise.all([listWorkspaceMemory(workspaceId), refreshProposals().catch(() => undefined)]);
+    setMemories(entries);
+  };
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     void refresh()
       .catch((err: unknown) => setError(describeError(err, "Could not load memory.")))
       .finally(() => setLoading(false));
   }, [workspaceId]);
+  const pendingFor = (memoryId: string) =>
+    proposals.some((proposal) => proposal.status === "pending" && proposal.memoryId === memoryId);
   function edit(memory: WorkspaceMemory) {
     setSelected(memory);
     setBuilderStep("entry");
@@ -79,11 +90,16 @@ export default function MemoryPage() {
     setError("");
     setNotice("");
     try {
-      const memory = selected
+      const result = selected
         ? await updateWorkspaceMemory(workspaceId, selected.id, draft)
         : await createWorkspaceMemory(workspaceId, draft);
       await refresh();
-      edit(memory);
+      if (!result.applied) {
+        if (!selected) setDraft(blank);
+        setNotice("Sent to an Admin for review. Agents keep using the current memory until it is approved.");
+        return;
+      }
+      if (result.memory) edit(result.memory);
       setNotice(selected ? "Memory updated." : "Memory saved for the workspace.");
     } catch (err) {
       setError(describeError(err, "Could not save memory."));
@@ -116,19 +132,25 @@ export default function MemoryPage() {
     if (
       !selected ||
       !(await dialog.confirm({
-        title: `Delete ${selected.title}?`,
-        message: "This removes it from future agent context. This cannot be undone.",
-        confirmLabel: "Delete memory",
+        title: reviewed ? `Ask to delete ${selected.title}?` : `Delete ${selected.title}?`,
+        message: reviewed
+          ? "An Admin reviews the request. The entry stays available to agents until it is approved."
+          : "This removes it from future agent context. This cannot be undone.",
+        confirmLabel: reviewed ? "Request deletion" : "Delete memory",
         danger: true,
       }))
     )
       return;
     setSaving(true);
     try {
-      await deleteWorkspaceMemory(workspaceId, selected.id);
+      const result = await deleteWorkspaceMemory(workspaceId, selected.id);
+      await refresh();
+      if (!result.applied) {
+        setNotice("Deletion sent to an Admin for review.");
+        return;
+      }
       setSelected(null);
       setDraft(blank);
-      await refresh();
     } catch (err) {
       setError(describeError(err, "Could not delete memory."));
     } finally {
@@ -143,9 +165,19 @@ export default function MemoryPage() {
         <h1>Keep the context that matters</h1>
         <p>
           Save shared knowledge and decisions with citations and review dates. Current entries are available to every
-          workspace agent.
+          workspace agent{reviewed ? ", so an Admin approves changes before agents use them" : ""}.
         </p>
       </header>
+      <MemoryReviewQueue
+        workspaceId={workspaceId}
+        isAdmin={access.isAdmin}
+        proposals={proposals}
+        onChanged={async (message) => {
+          setNotice(message);
+          setError("");
+          await refresh();
+        }}
+      />
       <div className="memory-layout">
         <section className="memory-list">
           <div className="section-heading">
@@ -182,7 +214,10 @@ export default function MemoryPage() {
               >
                 <span className={`memory-kind ${memory.kind}`}>{memory.kind}</span>
                 <strong>{memory.title}</strong>
-                <small>{stale(memory) ? "Needs review" : formatDate(memory.freshUntil)}</small>
+                <small>
+                  {stale(memory) ? "Needs review" : formatDate(memory.freshUntil)}
+                  {pendingFor(memory.id) ? " · Change pending" : ""}
+                </small>
               </button>
             ))
           ) : loading ? (
@@ -371,12 +406,12 @@ export default function MemoryPage() {
                 disabled={saving || !canChange || !draft.title.trim() || !draft.content.trim()}
                 onClick={() => void save()}
               >
-                {saving ? "Saving…" : selected ? "Save changes" : "Save memory"}
+                {saving ? "Saving…" : reviewed ? "Submit for review" : selected ? "Save changes" : "Save memory"}
               </button>
             )}
             {selected && (
               <button className="agent-delete-button" disabled={saving || !canChange} onClick={() => void remove()}>
-                Delete
+                {reviewed ? "Request deletion" : "Delete"}
               </button>
             )}
           </div>

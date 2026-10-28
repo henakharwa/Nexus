@@ -151,7 +151,8 @@ describe("PM-03 conditional Editor features", () => {
   it("basic: memory and artifact management can be revoked separately", async () => {
     const memory = { title: "Release process", content: "Review before deployment." };
     const artifact = { type: "plan", status: "draft", title: "Release plan", content: "## Review" };
-    expect((await as(editor).post(`/workspaces/${ws.id}/memory`, memory)).status).toBe(201);
+    // With the permission an Editor's memory change is accepted for Admin review (202).
+    expect((await as(editor).post(`/workspaces/${ws.id}/memory`, memory)).status).toBe(202);
     expect((await as(editor).post(`/workspaces/${ws.id}/artifacts`, artifact)).status).toBe(201);
     await grantEditor(ws.id, { manageMemory: false, manageArtifacts: false });
     expect((await as(editor).post(`/workspaces/${ws.id}/memory`, memory)).status).toBe(403);

@@ -1,0 +1,65 @@
+name: OWASP ZAP baseline
+
+# Passive OWASP ZAP baseline scan of a deployed Nexus (Security Validation
+# scope 12). It spiders the site and reports missing headers, cookie flags,
+# information leaks and similar issues; it never attacks the target.
+#
+# Run it against staging from the Actions tab (Run workflow), or set the
+# repository variable STAGING_URL (e.g. https://staging.nexus.example.com)
+# to also scan every Monday. Never point it at a site you don't own.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Base URL to scan (defaults to the STAGING_URL repository variable)"
+        required: false
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  zap-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TARGET: ${{ github.event.inputs.target || vars.STAGING_URL }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Require a target
+        run: |
+          if [ -z "$TARGET" ]; then
+            echo "::notice::No target. Pass one when running the workflow or set the STAGING_URL repository variable."
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Set up Node
+        if: env.SKIP != '1'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Fails fast with a readable list if a security header regressed.
+      - name: Check browser security headers
+        if: env.SKIP != '1'
+        run: node scripts/check-security-headers.mjs "$TARGET"
+
+      - name: ZAP baseline scan
+        if: env.SKIP != '1'
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ env.TARGET }}
+          rules_file_name: .zap/rules.tsv
+          # -a: include alpha passive rules. -j: also use the AJAX spider,
+          # since most screens are rendered client-side.
+          cmd_options: "-a -j"
+          issue_title: "OWASP ZAP baseline report"
+          artifact_name: zap-baseline-report
+          # FAIL rules in .zap/rules.tsv fail the job; WARN rules only report.
+          fail_action: true
+          allow_issue_writing: true

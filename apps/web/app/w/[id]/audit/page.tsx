@@ -22,6 +22,7 @@ import {
   listWorkspaceTasks,
   listWorkspaceMembers,
 } from "../../../../lib/api";
+import { toCsv } from "../../../../lib/csv";
 
 // Matches the AuditEventType union in packages/shared-types -- add a new
 // kind there and in services/chat-server/src/actions.ts / server.ts
@@ -51,6 +52,13 @@ const EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   "memory.created": "Memory saved",
   "memory.updated": "Memory updated",
   "memory.deleted": "Memory deleted",
+  "memory.change_proposed": "Memory change proposed",
+  "memory.change_approved": "Memory change approved",
+  "memory.change_rejected": "Memory change rejected",
+  "memory.change_withdrawn": "Memory change withdrawn",
+  "task.created": "Task created",
+  "task.updated": "Task updated",
+  "task.deleted": "Task deleted",
   "artifact.created": "Artifact created",
   "artifact.updated": "Artifact updated",
   "artifact.deleted": "Artifact deleted",
@@ -365,11 +373,13 @@ export default function AuditPage() {
           ? "✦"
           : event.eventType.startsWith("memory")
             ? "▣"
-            : event.eventType.startsWith("action")
-              ? "✓"
-              : event.eventType.startsWith("integration")
-                ? "⌁"
-                : "•";
+            : event.eventType.startsWith("task")
+              ? "☐"
+              : event.eventType.startsWith("action")
+                ? "✓"
+                : event.eventType.startsWith("integration")
+                  ? "⌁"
+                  : "•";
   async function saveView() {
     const name = await dialog.prompt({
       title: "Save this activity view",
@@ -423,7 +433,9 @@ export default function AuditPage() {
     const blob = new Blob(
       [
         "\ufeff",
-        rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\r\n"),
+        // Neutralises = + - @ so user-controlled names and summaries can't
+        // run as spreadsheet formulas when the file is opened.
+        toCsv(rows),
       ],
       { type: "text/csv;charset=utf-8" },
     );
@@ -696,7 +708,9 @@ export default function AuditPage() {
                               ? `/w/${workspaceId}/agents`
                               : event.eventType.startsWith("memory")
                                 ? `/w/${workspaceId}/memory`
-                                : `/w/${workspaceId}`
+                                : event.eventType.startsWith("task")
+                                  ? `/w/${workspaceId}/tasks`
+                                  : `/w/${workspaceId}`
                       }
                     >
                       Open related workspace area →

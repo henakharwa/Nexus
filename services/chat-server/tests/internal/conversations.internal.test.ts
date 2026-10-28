@@ -132,10 +132,10 @@ describe("CV-04 message history", () => {
 
 describe("CV-05 activity log", () => {
   it("basic: records member and memory events with the actor's name", async () => {
-    await request(app).post(`/workspaces/${ws.id}/memory`).set("Cookie", editor.cookie).send({ title: "Audit probe", content: "x" });
+    await request(app).post(`/workspaces/${ws.id}/memory`).set("Cookie", admin.cookie).send({ title: "Audit probe", content: "x" });
     const res = await request(app).get(`/workspaces/${ws.id}/audit`).set("Cookie", admin.cookie);
     expect(res.status).toBe(200);
-    expect(res.body.events.some((e: { summary: string }) => /Editor saved knowledge memory Audit probe/.test(e.summary))).toBe(true);
+    expect(res.body.events.some((e: { summary: string }) => /Admin saved knowledge memory Audit probe/.test(e.summary))).toBe(true);
     expect(res.body.events.some((e: { eventType: string }) => e.eventType === "member.joined")).toBe(true);
   });
   it("edge: filters by type and text, paginates with before and clamps limits", async () => {

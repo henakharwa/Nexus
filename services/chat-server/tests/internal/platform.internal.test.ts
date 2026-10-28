@@ -1,6 +1,8 @@
 // Notifications, per-member preferences, integrations, health and hostile input.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
+import express from "express";
+import { apiSecurityHeaders } from "../../src/server.js";
 import * as db from "@mai-chat/db";
 import { setupDatabase, makeUser, newApp, makeWorkspace, grantEditor, NIL_UUID, type TestUser } from "./helpers.js";
 
@@ -163,6 +165,42 @@ describe("IN-01 integrations", () => {
     expect((await request(app).delete(`/workspaces/${ws.id}/integrations/github?integrationId=${NIL_UUID}`).set("Cookie", editor.cookie)).status).toBe(403);
     await grantEditor(ws.id, { connectTools: true });
     expect((await request(app).get(`/workspaces/${ws.id}/integrations`).set("Cookie", outsider.cookie)).status).toBe(403);
+  });
+});
+
+describe("SY-00 browser security headers (scope 12)", () => {
+  it("basic: every API response forbids framing, sniffing, scripts and referrers", async () => {
+    for (const res of [
+      await request(app).get("/healthz"),
+      await request(app).get("/public/dashboards/00000000-0000-4000-8000-000000000000"),
+      await request(app).get("/workspaces").set("Cookie", admin.cookie),
+    ]) {
+      expect(res.headers["content-security-policy"]).toBe("default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+      expect(res.headers["x-content-type-options"]).toBe("nosniff");
+      expect(res.headers["x-frame-options"]).toBe("DENY");
+      expect(res.headers["referrer-policy"]).toBe("no-referrer");
+      expect(res.headers["x-powered-by"]).toBeUndefined();
+    }
+  });
+  it("edge: an unknown route still answers with no-script, no-framing headers", async () => {
+    // Express's own 404 page narrows the CSP to default-src 'none'.
+    const res = await request(app).get("/no-such-route");
+    expect(res.status).toBe(404);
+    expect(res.headers["content-security-policy"]).toMatch(/^default-src 'none'/);
+    expect(res.headers["x-frame-options"]).toBe("DENY");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+  });
+  it("edge: HSTS is only sent by production servers", async () => {
+    expect((await request(app).get("/healthz")).headers["strict-transport-security"]).toBeUndefined();
+    const prod = express();
+    prod.use(apiSecurityHeaders({ hsts: true }));
+    prod.get("/", (_req, res) => res.json({ ok: true }));
+    expect((await request(prod).get("/")).headers["strict-transport-security"]).toBe("max-age=31536000; includeSubDomains");
+  });
+  it("edge: CORS preflight from the web app still succeeds with the headers in place", async () => {
+    const res = await request(app).options("/workspaces").set("Origin", process.env.WEB_APP_URL ?? "http://localhost:3000").set("Access-Control-Request-Method", "POST");
+    expect(res.status).toBeLessThan(300);
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
   });
 });
 

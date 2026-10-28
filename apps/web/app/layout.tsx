@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 // Global styles, in cascade order: design tokens and base rules first, then
 // the feature stylesheets in app/styles (numbered to keep their order).
 import "./globals.css";
@@ -27,7 +28,11 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+// Every page renders per request so Next.js can stamp the CSP nonce from
+// proxy.ts on its scripts (a prerendered page has no nonce and would be
+// blocked by the policy).
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  await connection();
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>

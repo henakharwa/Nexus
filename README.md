@@ -398,6 +398,11 @@ as an Admin, and invites say which role a new member gets.
   Activity), and can take over workflows whose owner left.
 - **Editors** chat with the agent and teammates, and use tasks, workflows,
   memory and artifacts, but can't approve writes.
+- **Memory changes are reviewed.** Workspace memory goes into every agent
+  reply, so an Editor's new entry, edit or deletion waits on the Memory page
+  until an Admin approves it (agents keep using the current version until
+  then). Admins change memory directly. Task, memory and member changes are
+  all recorded in Activity.
 - A workspace always keeps at least one Admin.
 
 The full matrix is in `docs/Nexus Role Access Matrix.docx`.
@@ -610,3 +615,14 @@ set `TRUST_PROXY_HOPS` so per-IP limits see real client addresses. To run
 several chat-server processes, `REALTIME_BUS=postgres` (the production
 default) shares live events and the one-agent-turn lock through the
 database.
+
+Browser security headers are set in three places: a per-request nonce
+Content-Security-Policy plus nosniff, anti-framing, Referrer-Policy and
+Permissions-Policy in the web app (`apps/web/proxy.ts`,
+`apps/web/next.config.mjs`), a locked-down policy on every API response
+(`services/chat-server/src/server.ts`), and HSTS and fallbacks at the edge
+(`Caddyfile.oracle`). Check a deployment with
+`npm run security:headers -- https://your-domain`, and run the
+**OWASP ZAP baseline** workflow (`.github/workflows/zap-baseline.yml`)
+against staging from the Actions tab, or set the `STAGING_URL` repository
+variable to scan weekly.

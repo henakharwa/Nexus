@@ -58,6 +58,13 @@ export async function updateWorkspaceTask(workspaceId: string, taskId: string, i
   return result.rows[0] ? toWorkspaceTask({ ...result.rows[0], owner_name: null, created_by_name: null }) : null;
 }
 
+export async function getWorkspaceTask(workspaceId: string, taskId: string): Promise<WorkspaceTask | null> {
+  const result = await getPool().query(`SELECT t.*, owner.display_name AS owner_name, creator.display_name AS created_by_name
+    FROM workspace_tasks t LEFT JOIN users owner ON owner.id=t.owner_user_id LEFT JOIN users creator ON creator.id=t.created_by_user_id
+    WHERE t.workspace_id=$1 AND t.id=$2`, [workspaceId, taskId]);
+  return result.rows[0] ? toWorkspaceTask(result.rows[0]) : null;
+}
+
 export async function deleteWorkspaceTask(workspaceId: string, taskId: string): Promise<WorkspaceTask | null> {
   const result = await getPool().query("DELETE FROM workspace_tasks WHERE workspace_id=$1 AND id=$2 RETURNING *", [workspaceId, taskId]);
   return result.rows[0] ? toWorkspaceTask({ ...result.rows[0], owner_name: null, created_by_name: null }) : null;

@@ -23,7 +23,8 @@
     "migrate:down": "npm run migrate:down --workspace=packages/db",
     "format": "prettier --write \"apps/web/app/**/*.{ts,tsx,css}\" \"apps/web/lib/**/*.{ts,tsx}\"",
     "format:check": "prettier --check \"apps/web/app/**/*.{ts,tsx,css}\" \"apps/web/lib/**/*.{ts,tsx}\"",
-    "test:e2e": "node scripts/e2e.mjs"
+    "test:e2e": "node scripts/e2e.mjs",
+    "security:headers": "node scripts/check-security-headers.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

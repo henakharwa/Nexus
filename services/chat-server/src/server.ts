@@ -68,6 +68,23 @@ export {
 // The landing page stays public. OAuth login reuses the integration callback,
 // with a login-prefixed state distinguishing authentication from repo access.
 
+// Browser security headers for every API response (Security Validation
+// scope 12). The API only returns JSON and redirects, so its policy forbids
+// everything: a response opened directly in a tab can't run script, load
+// anything, or be framed. Caddy and the web app set their own page policy.
+export const API_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+export function apiSecurityHeaders(options: { hsts: boolean }) {
+  return (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader("Content-Security-Policy", API_CONTENT_SECURITY_POLICY);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    if (options.hsts) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    next();
+  };
+}
+
 export function createApp(
   deps: CreateServerDeps = defaultDeps,
   realtime?: { disconnectWorkspaceMember(workspaceId: string, userId: string, reason: string): void },
@@ -85,6 +102,8 @@ export function createApp(
   // (TRUST_PROXY_HOPS=1 for the Oracle deployment: Caddy only).
   const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
   if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0) app.set("trust proxy", trustedProxyHops);
+  app.disable("x-powered-by");
+  app.use(apiSecurityHeaders({ hsts: process.env.NODE_ENV === "production" }));
   app.use(cors({ origin: webAppUrl, credentials: true }));
   // GitHub webhook receivers verify a signature over the raw request body,
   // so they are registered before the JSON parser.
@@ -160,6 +179,7 @@ export function createApp(
     "taskId",
     "agentId",
     "memoryId",
+    "proposalId",
     "artifactId",
     "workflowId",
     "conversationId",

@@ -279,6 +279,39 @@ export interface WorkspaceMemory {
   updatedAt: string;
 }
 
+// A memory change made by a non-Admin waits here until an Admin approves it.
+// Agents only ever read approved entries (WorkspaceMemory).
+export type WorkspaceMemoryProposalAction = "create" | "update" | "delete";
+export type WorkspaceMemoryProposalStatus = "pending" | "approved" | "rejected" | "withdrawn";
+
+export interface WorkspaceMemoryProposal {
+  id: string;
+  workspaceId: string;
+  memoryId: string | null;
+  appliedMemoryId: string | null;
+  action: WorkspaceMemoryProposalAction;
+  kind: WorkspaceMemoryKind;
+  title: string;
+  content: string;
+  sourceTitle: string | null;
+  sourceUrl: string | null;
+  freshUntil: string | null;
+  // The approved entry as it stood when the change was proposed (update and
+  // delete only), so a reviewer sees exactly what would change.
+  current: WorkspaceMemory | null;
+  // True when the entry changed after this proposal was made; approving it
+  // is refused so a newer version is never silently overwritten.
+  outdated: boolean;
+  proposedByUserId: string | null;
+  proposedByName: string | null;
+  status: WorkspaceMemoryProposalStatus;
+  reviewNote: string | null;
+  reviewedByUserId: string | null;
+  reviewedByName: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
 export type WorkspaceArtifactType = "plan" | "report" | "release_notes" | "dashboard" | "task_list";
 export type WorkspaceArtifactStatus = "draft" | "published" | "archived";
 export type DashboardHealth = "on_track" | "at_risk" | "off_track";
@@ -941,6 +974,15 @@ export type AuditEventType =
   | "memory.created"
   | "memory.updated"
   | "memory.deleted"
+  // Scope 11: non-Admin memory changes are proposals an Admin reviews.
+  | "memory.change_proposed"
+  | "memory.change_approved"
+  | "memory.change_rejected"
+  | "memory.change_withdrawn"
+  // Scope 11: task board changes are recorded like every other shared object.
+  | "task.created"
+  | "task.updated"
+  | "task.deleted"
   | "artifact.created"
   | "artifact.updated"
   | "artifact.deleted"

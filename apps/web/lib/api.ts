@@ -574,34 +574,92 @@ export async function listWorkspaceMemory(
   const res = await authenticatedFetch(`${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/memory`);
   return (await parseJsonOrThrow(res)) as import("@mai-chat/shared-types").WorkspaceMemory[];
 }
+// Admins change memory directly. Anyone else's change is held for an Admin
+// to review (202 + the proposal); agents only see it once approved.
+type WorkspaceMemoryValue = import("@mai-chat/shared-types").WorkspaceMemory;
+type WorkspaceMemoryProposalValue = import("@mai-chat/shared-types").WorkspaceMemoryProposal;
+export type WorkspaceMemoryChangeResult =
+  { applied: true; memory: WorkspaceMemoryValue | null } | { applied: false; proposal: WorkspaceMemoryProposalValue };
+
+async function memoryChangeResult(res: Response): Promise<WorkspaceMemoryChangeResult> {
+  if (res.status === 204) return { applied: true, memory: null };
+  const body = await parseJsonOrThrow(res);
+  if (res.status === 202)
+    return { applied: false, proposal: (body as { proposal: WorkspaceMemoryProposalValue }).proposal };
+  return { applied: true, memory: body as WorkspaceMemoryValue };
+}
+function memoryUrl(workspaceId: string, suffix = ""): string {
+  return `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/memory${suffix}`;
+}
 export async function createWorkspaceMemory(
   workspaceId: string,
   input: WorkspaceMemoryInput,
-): Promise<import("@mai-chat/shared-types").WorkspaceMemory> {
-  const res = await authenticatedFetch(`${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/memory`, {
+): Promise<WorkspaceMemoryChangeResult> {
+  const res = await authenticatedFetch(memoryUrl(workspaceId), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  return (await parseJsonOrThrow(res)) as import("@mai-chat/shared-types").WorkspaceMemory;
+  return memoryChangeResult(res);
 }
 export async function updateWorkspaceMemory(
   workspaceId: string,
   memoryId: string,
   input: WorkspaceMemoryInput,
-): Promise<import("@mai-chat/shared-types").WorkspaceMemory> {
-  const res = await authenticatedFetch(
-    `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/memory/${encodeURIComponent(memoryId)}`,
-    { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(input) },
-  );
-  return (await parseJsonOrThrow(res)) as import("@mai-chat/shared-types").WorkspaceMemory;
+): Promise<WorkspaceMemoryChangeResult> {
+  const res = await authenticatedFetch(memoryUrl(workspaceId, `/${encodeURIComponent(memoryId)}`), {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return memoryChangeResult(res);
 }
-export async function deleteWorkspaceMemory(workspaceId: string, memoryId: string): Promise<void> {
+export async function deleteWorkspaceMemory(
+  workspaceId: string,
+  memoryId: string,
+): Promise<WorkspaceMemoryChangeResult> {
+  const res = await authenticatedFetch(memoryUrl(workspaceId, `/${encodeURIComponent(memoryId)}`), {
+    method: "DELETE",
+  });
+  return memoryChangeResult(res);
+}
+export async function listMemoryProposals(
+  workspaceId: string,
+  status?: import("@mai-chat/shared-types").WorkspaceMemoryProposalStatus,
+): Promise<WorkspaceMemoryProposalValue[]> {
+  const res = await authenticatedFetch(memoryUrl(workspaceId, `/proposals${status ? `?status=${status}` : ""}`));
+  return (await parseJsonOrThrow(res)) as WorkspaceMemoryProposalValue[];
+}
+export async function reviewMemoryProposal(
+  workspaceId: string,
+  proposalId: string,
+  decision: "approve" | "reject",
+  note?: string,
+): Promise<{ proposal: WorkspaceMemoryProposalValue; memory: WorkspaceMemoryValue | null }> {
   const res = await authenticatedFetch(
-    `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/memory/${encodeURIComponent(memoryId)}`,
-    { method: "DELETE" },
+    memoryUrl(workspaceId, `/proposals/${encodeURIComponent(proposalId)}/${decision}`),
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(note ? { note } : {}),
+    },
   );
-  if (!res.ok) await parseJsonOrThrow(res);
+  return (await parseJsonOrThrow(res)) as {
+    proposal: WorkspaceMemoryProposalValue;
+    memory: WorkspaceMemoryValue | null;
+  };
+}
+export async function withdrawMemoryProposal(
+  workspaceId: string,
+  proposalId: string,
+): Promise<WorkspaceMemoryProposalValue> {
+  const res = await authenticatedFetch(
+    memoryUrl(workspaceId, `/proposals/${encodeURIComponent(proposalId)}/withdraw`),
+    {
+      method: "POST",
+    },
+  );
+  return (await parseJsonOrThrow(res)) as WorkspaceMemoryProposalValue;
 }
 
 export type WorkspaceArtifactInput = {
