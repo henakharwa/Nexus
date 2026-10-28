@@ -56,10 +56,10 @@ jobs:
           target: ${{ env.TARGET }}
           rules_file_name: .zap/rules.tsv
           # -a: include alpha passive rules. -j: also use the AJAX spider,
-          # since most screens are rendered client-side.
-          cmd_options: "-a -j"
+          # since most screens are rendered client-side. -I: warnings are
+          # reported in the issue but only FAIL rules fail the job.
+          cmd_options: "-a -j -I"
           issue_title: "OWASP ZAP baseline report"
           artifact_name: zap-baseline-report
-          # FAIL rules in .zap/rules.tsv fail the job; WARN rules only report.
           fail_action: true
           allow_issue_writing: true

@@ -80,6 +80,9 @@ export function apiSecurityHeaders(options: { hsts: boolean }) {
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    // API answers are per-user JSON; never let a browser or shared proxy keep
+    // a copy (ZAP rule 10015). Routes may still set their own Cache-Control.
+    res.setHeader("Cache-Control", "no-store");
     if (options.hsts) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     next();
   };

@@ -30,8 +30,10 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      // Pages only: built assets and icons carry no script context.
-      source: "/((?!_next/static|_next/image|favicon.ico|icon.svg|.*\\.(?:png|jpg|jpeg|svg|mp4|webm|ico|txt)$).*)",
+      // Everything except built assets and media, which carry no script
+      // context. Text routes such as robots.txt and every 404 keep the policy
+      // (ZAP baseline rule 10038).
+      source: "/((?!_next/static|_next/image|favicon.ico|icon.svg|.*\\.(?:png|jpg|jpeg|svg|mp4|webm|ico)$).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

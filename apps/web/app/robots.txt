@@ -1,0 +1,9 @@
+User-Agent: *
+Allow: /
+Disallow: /w/
+Disallow: /shared/
+Disallow: /dashboard/
+Disallow: /release-notes/
+Disallow: /reset-password
+Disallow: /verify-email
+Disallow: /api/

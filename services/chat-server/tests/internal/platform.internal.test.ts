@@ -180,6 +180,7 @@ describe("SY-00 browser security headers (scope 12)", () => {
       expect(res.headers["x-frame-options"]).toBe("DENY");
       expect(res.headers["referrer-policy"]).toBe("no-referrer");
       expect(res.headers["x-powered-by"]).toBeUndefined();
+      expect(res.headers["cache-control"]).toMatch(/no-store/);
     }
   });
   it("edge: an unknown route still answers with no-script, no-framing headers", async () => {
