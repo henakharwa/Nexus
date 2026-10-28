@@ -12,3 +12,9 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 export function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+/**
+ * Cache-Control for per-user and sign-in responses: never stored by the
+ * browser or a shared proxy (the full set OWASP ZAP rule 10015 expects).
+ */
+export const NO_STORE = "no-store, no-cache, must-revalidate";

@@ -7,6 +7,8 @@
   # so the web app's per-request nonce CSP is never overwritten. HSTS and
   # removing the Server banner always apply here at the TLS edge.
   header {
+    # Apply after the upstream answers, so "?" sees the app's own headers.
+    defer
     Strict-Transport-Security "max-age=31536000; includeSubDomains"
     -Server
     -X-Powered-By

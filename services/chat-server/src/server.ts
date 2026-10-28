@@ -29,7 +29,7 @@ import {
 import { formatTeamActivity, listTeamActivity, summarizeGithubEvent } from "./github-team.js";
 import type { MessageProvenance, TeamActivity } from "@mai-chat/shared-types";
 import { parseMentions } from "./mentions.js";
-import { UUID_RE, paramString, errMessage } from "./http-utils.js";
+import { UUID_RE, paramString, errMessage, NO_STORE } from "./http-utils.js";
 import { attachUser, requireAuth, parseSessionToken, registerUserAuthRoutes, type UserAuthConfig } from "./auth.js";
 import { registerEmailVerificationRoutes } from "./email-verification.js";
 import { registerPasswordResetRoutes } from "./password-reset.js";
@@ -79,10 +79,12 @@ export function apiSecurityHeaders(options: { hsts: boolean }) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "no-referrer");
+    // The API never needs device features (ZAP rule 10063).
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), interest-cohort=()");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     // API answers are per-user JSON; never let a browser or shared proxy keep
     // a copy (ZAP rule 10015). Routes may still set their own Cache-Control.
-    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Cache-Control", NO_STORE);
     if (options.hsts) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     next();
   };

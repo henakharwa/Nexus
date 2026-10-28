@@ -9,6 +9,7 @@ import type { User } from "@mai-chat/shared-types";
 import { registerEmailAuthRoutes } from "./email-auth.js";
 import { registerGoogleAuthRoutes, type GoogleAuthConfig, type GoogleAuthDeps } from "./google-auth.js";
 import { createMailer, defaultMailerConfig, type Mailer } from "./mailer.js";
+import { NO_STORE } from "./http-utils.js";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -213,7 +214,7 @@ export function registerUserAuthRoutes(
   // which is harmless in a test run.
   mailer: Mailer = createMailer(defaultMailerConfig())
 ): void {
-  app.use("/auth", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
+  app.use("/auth", (_req, res, next) => { res.setHeader("Cache-Control", NO_STORE); next(); });
   app.get("/auth/providers", (_req, res) => res.json({ email: true, github: !!(config.clientId && config.clientSecret), google: !!(config.google?.clientId && config.google.clientSecret) }));
   registerEmailAuthRoutes(app, config, mailer);
   registerGoogleAuthRoutes(app, config, deps.google);

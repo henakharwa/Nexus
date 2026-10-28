@@ -7,6 +7,7 @@ import * as db from "@mai-chat/db";
 import type { User } from "@mai-chat/shared-types";
 import { requireAuth, type UserAuthConfig } from "./auth.js";
 import type { Mailer } from "./mailer.js";
+import { NO_STORE } from "./http-utils.js";
 
 export async function sendVerificationEmail(user: { id: string }, email: string, config: UserAuthConfig, mailer: Mailer): Promise<void> {
   const token = await db.createEmailVerificationToken(user.id, email);
@@ -22,8 +23,8 @@ export async function sendVerificationEmail(user: { id: string }, email: string,
 }
 
 export function registerEmailVerificationRoutes(app: Express, config: UserAuthConfig, mailer: Mailer): void {
-  app.use("/auth/verify-email", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
-  app.use("/auth/resend-verification", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
+  app.use("/auth/verify-email", (_req, res, next) => { res.setHeader("Cache-Control", NO_STORE); next(); });
+  app.use("/auth/resend-verification", (_req, res, next) => { res.setHeader("Cache-Control", NO_STORE); next(); });
 
   // Not requireAuth-gated on purpose: the person clicking a link from
   // their inbox may not have an active session in that browser (e.g. a

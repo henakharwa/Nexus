@@ -181,6 +181,7 @@ describe("SY-00 browser security headers (scope 12)", () => {
       expect(res.headers["referrer-policy"]).toBe("no-referrer");
       expect(res.headers["x-powered-by"]).toBeUndefined();
       expect(res.headers["cache-control"]).toMatch(/no-store/);
+      expect(res.headers["permissions-policy"]).toContain("camera=()");
     }
   });
   it("edge: an unknown route still answers with no-script, no-framing headers", async () => {
@@ -190,6 +191,11 @@ describe("SY-00 browser security headers (scope 12)", () => {
     expect(res.headers["content-security-policy"]).toMatch(/^default-src 'none'/);
     expect(res.headers["x-frame-options"]).toBe("DENY");
     expect(res.headers["x-content-type-options"]).toBe("nosniff");
+  });
+  it("edge: per-user and sign-in answers carry the full no-store set", async () => {
+    for (const res of [await request(app).get("/workspaces").set("Cookie", admin.cookie), await request(app).get("/auth/providers")]) {
+      expect(res.headers["cache-control"]).toBe("no-store, no-cache, must-revalidate");
+    }
   });
   it("edge: HSTS is only sent by production servers", async () => {
     expect((await request(app).get("/healthz")).headers["strict-transport-security"]).toBeUndefined();

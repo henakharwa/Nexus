@@ -7,10 +7,11 @@ import * as db from "@mai-chat/db";
 import { hashPassword } from "./passwords.js";
 import { issueSession, type UserAuthConfig } from "./auth.js";
 import type { Mailer } from "./mailer.js";
+import { NO_STORE } from "./http-utils.js";
 
 export function registerPasswordResetRoutes(app: Express, config: UserAuthConfig, mailer: Mailer): void {
-  app.use("/auth/forgot-password", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
-  app.use("/auth/reset-password", (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
+  app.use("/auth/forgot-password", (_req, res, next) => { res.setHeader("Cache-Control", NO_STORE); next(); });
+  app.use("/auth/reset-password", (_req, res, next) => { res.setHeader("Cache-Control", NO_STORE); next(); });
 
   app.post("/auth/forgot-password", async (req: Request, res: Response) => {
     const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";

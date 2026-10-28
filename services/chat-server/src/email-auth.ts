@@ -4,10 +4,11 @@ import { hashPassword, verifyPassword } from "./passwords.js";
 import { issueSession, type UserAuthConfig } from "./auth.js";
 import { sendVerificationEmail } from "./email-verification.js";
 import { createMailer, defaultMailerConfig, type Mailer } from "./mailer.js";
+import { NO_STORE } from "./http-utils.js";
 
 export function registerEmailAuthRoutes(app: Express, config: UserAuthConfig, mailer: Mailer = createMailer(defaultMailerConfig())): void {
   app.post(["/auth/signup/email", "/auth/login/email"], async (req, res) => {
-    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Cache-Control", NO_STORE);
     // JSON and same-origin requests only, including login-CSRF protection.
     if (!req.is("application/json") || (req.headers.origin && req.headers.origin !== config.webAppUrl)) {
       return res.status(403).json({ error: "Invalid sign-in request." });
