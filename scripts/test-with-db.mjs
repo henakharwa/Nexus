@@ -27,7 +27,8 @@ const dataDir = join(tmpdir(), "mai-chat-pgdata-test");
 const port = 55433;
 const database = "mai_chat_test";
 const connectionString = `postgres://postgres:postgres@localhost:${port}/${database}`;
-// The production image runs as root so Caddy can bind ports 80 and 443.
+// Inside a container this script may run as root (a CI or dev container;
+// the production image itself runs as the unprivileged "node" user).
 // embedded-postgres cannot launch PostgreSQL as root, but it can create an
 // unprivileged temporary database user in a Docker container. Keep ordinary
 // host runs unchanged: the library warns that creating users mutates the host.

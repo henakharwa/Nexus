@@ -10,6 +10,7 @@ import {
 } from "../artifact-drafts.js";
 import type { Request, Response } from "express";
 import type { RouteContext } from "./context.js";
+import { ABUSE_LIMITS, enforceAbuseLimit, enforceTokenBudget } from "../abuse-limits.js";
 
 export function registerArtifactsRoutes({ app, deps, requireRole, requirePermission }: RouteContext): void {
   // Reading, presence, and comments remain shared review capabilities.
@@ -131,6 +132,7 @@ export function registerArtifactsRoutes({ app, deps, requireRole, requirePermiss
     if (!access.allowed) return res.status(403).json({ error: "Only the artifact author or an Admin can refresh it." });
     if (access.artifact.type !== "dashboard")
       return res.status(400).json({ error: "Only Dashboard artifacts can be refreshed." });
+    if (!(await enforceAbuseLimit(res, ABUSE_LIMITS.aiGenerate, req.user!.id))) return;
     const dashboardData = await workspaceDashboardSnapshot(access.artifact.workspaceId, deps, req.user!.id);
     const artifact = await db.updateWorkspaceArtifact(
       access.artifact.workspaceId,
@@ -166,6 +168,9 @@ export function registerArtifactsRoutes({ app, deps, requireRole, requirePermiss
       return res.status(403).json({ error: "Only the artifact author or an Admin can generate it." });
     if (access.artifact.type === "dashboard")
       return res.status(400).json({ error: "Dashboards use Refresh live data instead." });
+    // This one calls the model, so it also draws on the daily token budget.
+    if (!(await enforceTokenBudget(res, access.artifact.workspaceId))) return;
+    if (!(await enforceAbuseLimit(res, ABUSE_LIMITS.aiGenerate, req.user!.id))) return;
     const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
     let content: string;
     try {
@@ -206,6 +211,7 @@ export function registerArtifactsRoutes({ app, deps, requireRole, requirePermiss
       return res.status(403).json({ error: "Only the artifact author or an Admin can generate it." });
     if (access.artifact.type !== "release_notes")
       return res.status(400).json({ error: "Only Release notes artifacts can be generated." });
+    if (!(await enforceAbuseLimit(res, ABUSE_LIMITS.aiGenerate, req.user!.id))) return;
     const content = await workspaceReleaseNotesDraft(
       access.artifact.workspaceId,
       access.artifact.id,
@@ -246,6 +252,7 @@ export function registerArtifactsRoutes({ app, deps, requireRole, requirePermiss
       return res.status(403).json({ error: "Only the artifact author or an Admin can generate it." });
     if (access.artifact.type !== "report")
       return res.status(400).json({ error: "Only Report artifacts can be generated." });
+    if (!(await enforceAbuseLimit(res, ABUSE_LIMITS.aiGenerate, req.user!.id))) return;
     const content = await workspaceReportDraft(access.artifact.workspaceId, access.artifact.id);
     const artifact = await db.updateWorkspaceArtifact(
       access.artifact.workspaceId,

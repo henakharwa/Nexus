@@ -30,6 +30,7 @@ import { formatTeamActivity, listTeamActivity, summarizeGithubEvent } from "./gi
 import type { MessageProvenance, TeamActivity } from "@mai-chat/shared-types";
 import { parseMentions } from "./mentions.js";
 import { UUID_RE, paramString, errMessage, NO_STORE } from "./http-utils.js";
+import { tokenBudgetExhaustedMessage } from "./abuse-limits.js";
 import { attachUser, requireAuth, parseSessionToken, registerUserAuthRoutes, type UserAuthConfig } from "./auth.js";
 import { registerEmailVerificationRoutes } from "./email-verification.js";
 import { registerPasswordResetRoutes } from "./password-reset.js";
@@ -685,6 +686,11 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
     const output = agentMessage.content;
     const providerTokens = result.providerPromptTokens + result.providerCompletionTokens;
     const estimatedTokens = providerTokens || Math.ceil(((workflowInstructions?.length ?? 0) + output.length) / 4);
+    // Counts toward the workspace's daily AI token budget (scope 14). A
+    // bookkeeping failure must never lose the reply that was just sent.
+    await db.recordWorkspaceTokenUsage(workspaceId, estimatedTokens).catch((error) =>
+      console.error(JSON.stringify({ level: "error", event: "token_usage_record_failed", workspaceId, error: errMessage(error) })),
+    );
     return {
       toolCalls: result.toolCallsMade,
       estimatedTokens,
@@ -748,6 +754,8 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
       ) {
         throw new Error(`The workflow owner cannot use the ${workflow.agentKind} provider.`);
       }
+      const budget = await db.getWorkspaceTokenBudget(workflow.workspaceId);
+      if (budget.exhausted) throw new Error(tokenBudgetExhaustedMessage(budget));
       const conversation = workflow.conversationId
         ? await db.getConversation(workflow.workspaceId, workflow.conversationId)
         : await db.createConversation({
@@ -1162,6 +1170,16 @@ export function createChatServer(deps: CreateServerDeps = defaultDeps) {
                     "You've reached the hourly limit for agent requests. Please try again later, or hand this off to a teammate with an @mention.",
                 }),
               );
+              return;
+            }
+            // The workspace's daily AI token budget (scope 14).
+            const budget = await db.getWorkspaceTokenBudget(workspaceId).catch(async (error) => {
+              await rooms.releaseAgentTurn(roomId).catch(() => undefined);
+              throw error;
+            });
+            if (budget.exhausted) {
+              await rooms.releaseAgentTurn(roomId);
+              ws.send(JSON.stringify({ type: "error", error: tokenBudgetExhaustedMessage(budget) }));
               return;
             }
           }

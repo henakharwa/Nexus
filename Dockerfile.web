@@ -7,4 +7,8 @@ RUN npm ci \
   && npm run build --workspace=apps/web
 
 ENV NODE_ENV=production
+# Run as the image's unprivileged "node" user; only Next.js' build folder
+# (its runtime cache) is writable.
+RUN chown -R node:node /app/apps/web/.next
+USER node
 CMD ["npm", "run", "start:web"]

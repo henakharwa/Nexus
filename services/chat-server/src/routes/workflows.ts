@@ -4,6 +4,7 @@ import { UUID_RE, paramString } from "../http-utils.js";
 import { resolveLlmConfig } from "../llm-client.js";
 import type { Request, Response } from "express";
 import type { RouteContext } from "./context.js";
+import { ABUSE_LIMITS, enforceAbuseLimit, enforceTokenBudget } from "../abuse-limits.js";
 
 export function registerWorkflowsRoutes({ app, requireRole, requirePermission }: RouteContext): void {
   const workflowTriggers = ["manual", "schedule", "github_issue", "github_status", "slack_mention"] as const;
@@ -160,6 +161,30 @@ export function registerWorkflowsRoutes({ app, requireRole, requirePermission }:
         : undefined;
     res.json(await db.listWorkspaceWorkflowRuns(paramString(req.params.id), { limit, before }));
   });
+  // Daily AI token budget (scope 14): everyone can see usage; Admins set the limit.
+  app.get("/workspaces/:id/observability/token-budget", async (req: Request, res: Response) => {
+    if (!(await requireRole(req, res, ["admin", "editor"]))) return;
+    res.json(await db.getWorkspaceTokenBudget(paramString(req.params.id)));
+  });
+  app.put("/workspaces/:id/observability/token-budget", async (req: Request, res: Response) => {
+    if (!(await requireRole(req, res, ["admin"]))) return;
+    const workspaceId = paramString(req.params.id);
+    const value = req.body?.dailyTokenBudget;
+    if (value !== null && !(db.DAILY_TOKEN_BUDGET_CHOICES as readonly number[]).includes(Number(value)))
+      return res.status(400).json({ error: `dailyTokenBudget must be null (server default) or one of ${db.DAILY_TOKEN_BUDGET_CHOICES.join(", ")}.` });
+    const before = await db.getWorkspaceTokenBudget(workspaceId);
+    const budget = await db.setWorkspaceDailyTokenBudget(workspaceId, value === null ? null : Number(value));
+    await db.recordAuditEvent({
+      workspaceId,
+      eventType: "workspace.budget_updated",
+      actorType: "user",
+      actorUserId: req.user!.id,
+      actorName: req.user!.displayName,
+      summary: `${req.user!.displayName} changed the daily AI token budget from ${before.dailyLimit.toLocaleString("en-US")} to ${budget.dailyLimit.toLocaleString("en-US")} tokens${budget.isCustom ? "" : " (server default)"}`,
+      metadata: { setting: "daily_token_budget", from: before.dailyLimit, to: budget.dailyLimit },
+    });
+    res.json(budget);
+  });
   app.get("/workspaces/:id/observability/retention", async (req: Request, res: Response) => {
     if (!(await requireRole(req, res, ["admin", "editor"]))) return;
     res.json({
@@ -200,6 +225,8 @@ export function registerWorkflowsRoutes({ app, requireRole, requirePermission }:
     const eventText = typeof req.body?.eventText === "string" ? req.body.eventText.trim().slice(0, 4_000) : "";
     if (eventText)
       return res.status(400).json({ error: "Manual workflow runs cannot supply event data. Event data is accepted only from verified provider webhooks." });
+    if (!(await enforceTokenBudget(res, workflow.workspaceId))) return;
+    if (!(await enforceAbuseLimit(res, ABUSE_LIMITS.workflowRun, req.user!.id))) return;
     if (!(await db.hasWorkflowRunCapacity(workflow.workspaceId)))
       return res.status(429).json({ error: `This workspace has reached its hourly workflow-run limit (${db.workflowRunQuotaPerHour()}). Try again later.` });
     const runner = app.locals.runWorkflow as

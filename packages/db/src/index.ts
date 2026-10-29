@@ -10,6 +10,7 @@ export {
   saveOAuthPendingState,
   consumeOAuthPendingState,
   consumeRateLimit,
+  takeRateLimit,
   isRateLimited,
   checkDatabaseHealth,
 } from "./system.js";
@@ -225,3 +226,11 @@ export {
   tryAcquireAgentTurnLock,
   releaseAgentTurnLock,
 } from "./realtime.js";
+export {
+  defaultDailyTokenBudget,
+  recordWorkspaceTokenUsage,
+  getWorkspaceTokenBudget,
+  hasWorkspaceTokenBudget,
+  setWorkspaceDailyTokenBudget,
+  DAILY_TOKEN_BUDGET_CHOICES,
+} from "./usage.js";

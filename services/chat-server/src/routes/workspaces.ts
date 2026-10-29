@@ -4,11 +4,13 @@ import { UUID_RE, errMessage, paramString } from "../http-utils.js";
 import { requireAuth } from "../auth.js";
 import type { Request, Response } from "express";
 import type { RouteContext } from "./context.js";
+import { ABUSE_LIMITS, enforceAbuseLimit } from "../abuse-limits.js";
 
 export function registerWorkspacesRoutes({ app, deps, webAppUrl, requireRole }: RouteContext): void {
   app.post("/workspaces", async (req: Request, res: Response) => {
     const name = typeof req.body?.name === "string" ? db.normalizeWorkspaceName(req.body.name) : "";
     if (!name) return res.status(400).json({ error: "name is required" });
+    if (!(await enforceAbuseLimit(res, ABUSE_LIMITS.workspaceCreate, req.user!.id))) return;
     let workspace;
     try {
       workspace = await db.createWorkspace(name, req.user!.id);
@@ -43,6 +45,10 @@ export function registerWorkspacesRoutes({ app, deps, webAppUrl, requireRole }: 
     if (!workspace) return res.status(404).json({ error: "not found" });
     if (await db.isWorkspaceMemberEmail(workspaceId, email))
       return res.status(409).json({ error: "This user is already in the workspace." });
+    // Every invitation sends an email from the Nexus domain: cap it per
+    // workspace and per sender so it can't be used as a spam relay.
+    if (!(await enforceAbuseLimit(res, ABUSE_LIMITS.inviteWorkspace, workspaceId))) return;
+    if (!(await enforceAbuseLimit(res, ABUSE_LIMITS.inviteUser, req.user!.id))) return;
     const invite = await db.createWorkspaceInvitation({ workspaceId, email, invitedByUserId: req.user!.id, role });
     const inviteUrl = new URL("/", webAppUrl);
     inviteUrl.searchParams.set("invite", invite.token);

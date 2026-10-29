@@ -1139,3 +1139,69 @@
   padding: 6px 8px;
   white-space: nowrap;
 }
+
+/* Daily AI token budget (Security Validation scope 14) */
+.token-budget-meter {
+  height: 8px;
+  margin: 6px 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+  overflow: hidden;
+}
+
+.token-budget-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.daily-token-budget.exhausted .token-budget-meter i {
+  background: var(--danger);
+}
+
+.daily-token-budget.exhausted strong {
+  color: var(--danger-strong);
+}
+
+.token-budget-days {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 56px;
+  margin: 10px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.token-budget-days li {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  height: 100%;
+  gap: 3px;
+}
+
+.token-budget-days i {
+  display: block;
+  width: 100%;
+  max-width: 18px;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent-soft-border);
+}
+
+.token-budget-days li:last-child i {
+  background: var(--accent);
+}
+
+.token-budget-days em {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.daily-token-budget .observability-control {
+  margin-top: 10px;
+}

@@ -39,7 +39,18 @@ updates:
     commit-message:
       prefix: "ci"
 
+  # Keeps the pinned image digests in the Dockerfiles current
+  # (Security Validation scope 13).
   - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels: [dependencies]
+    commit-message:
+      prefix: "docker"
+
+  # The pinned postgres image in docker-compose.oracle.yml.
+  - package-ecosystem: docker-compose
     directory: "/"
     schedule:
       interval: monthly

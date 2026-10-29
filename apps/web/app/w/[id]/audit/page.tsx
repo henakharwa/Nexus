@@ -39,6 +39,7 @@ const EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   "member.removed": "Member removed",
   "integration.connected": "Integration connected",
   "workspace.permissions_updated": "Permissions updated",
+  "workspace.budget_updated": "Daily AI budget changed",
   "agent.created": "Agent draft created",
   "agent.updated": "Agent draft updated",
   "agent.deleted": "Agent deleted",

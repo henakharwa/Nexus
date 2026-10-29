@@ -1,3 +1,6 @@
+# Base images: pin each to an exact digest (Security Validation scope 13,
+# pending the digests from the running server) so a rebuild never silently
+# picks up a different upstream image.
 FROM ghcr.io/github/github-mcp-server:latest AS github_mcp
 FROM caddy:2-alpine AS caddy
 
@@ -23,5 +26,19 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 ENV GITHUB_MCP_COMMAND=github-mcp-server
-RUN chmod +x scripts/start-nexus.sh
+
+# Run as the image's unprivileged "node" user (uid 1000), not root.
+# - The application code stays owned by root, so the running process can't
+#   modify it; only Next.js' build folder (its runtime cache) is writable.
+# - Caddy keeps its certificates in /data/caddy and its config in
+#   /config/caddy (the docker-compose volumes).
+# - Caddy still listens on 80/443: docker-compose.oracle.yml lets
+#   unprivileged processes bind low ports inside the container.
+RUN chmod +x scripts/start-nexus.sh \
+  && mkdir -p /data/caddy /config/caddy \
+  && chown -R node:node /data /config /app/apps/web/.next
+ENV HOME=/home/node
+ENV XDG_DATA_HOME=/data
+ENV XDG_CONFIG_HOME=/config
+USER node
 CMD ["./scripts/start-nexus.sh"]

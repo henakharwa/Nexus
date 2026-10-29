@@ -37,7 +37,13 @@ See `docs/spec.md` for the product spec. The original spec for the retired proto
   Slack-mention triggers), Approvals (approval rules), Agents, Artifacts,
   Memory, Notifications, Activity/audit log, Observability and Integrations.
 - **Limits.** A message length limit, and a cap on agent turns per person per
-  hour (`AGENT_TURNS_PER_USER_PER_HOUR`, default 60).
+  hour (`AGENT_TURNS_PER_USER_PER_HOUR`, default 60). Each workspace also has
+  a daily AI token budget (`WORKSPACE_DAILY_TOKEN_BUDGET`, default 500,000;
+  Admins can change it on the Observability page, where everyone can see
+  today's usage). Creating workspaces and agents, sending invitations, AI
+  drafts and manual workflow runs are rate-limited per person (and
+  invitations per workspace); the defaults and their environment variables
+  are in `.env.example` and `services/chat-server/src/abuse-limits.ts`.
 
 Every tool connects only through its own OAuth login. There is no option to
 paste a token.

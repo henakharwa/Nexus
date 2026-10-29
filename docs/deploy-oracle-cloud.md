@@ -118,6 +118,12 @@ Replace the Render callback URL in each provider console:
 
 ## Operations
 
+The `nexus` container runs as the unprivileged `node` user (uid 1000) with
+no Linux capabilities. A one-off `volume-permissions` step in
+`docker-compose.oracle.yml` hands Caddy's certificate volumes to that user
+before Nexus starts, so upgrading from an older root-run version keeps the
+existing certificate.
+
 Deploy a new version:
 
 ```bash

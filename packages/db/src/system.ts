@@ -45,9 +45,18 @@ export async function consumeOAuthPendingState<T extends Record<string, unknown>
   return result.rows[0]?.payload as T | undefined ?? null;
 }
 export async function consumeRateLimit(scope: string, subject: string, maxAttempts: number, windowSeconds: number): Promise<boolean> {
+  return (await takeRateLimit(scope, subject, maxAttempts, windowSeconds)).allowed;
+}
+
+/**
+ * Counts one attempt against a fixed window and reports whether it is
+ * allowed, plus how many seconds remain until the window resets (for a
+ * Retry-After header and a readable message).
+ */
+export async function takeRateLimit(scope: string, subject: string, maxAttempts: number, windowSeconds: number): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
   await getPool().query("DELETE FROM auth_rate_limits WHERE window_ends_at <= now()");
-  const result = await getPool().query(`INSERT INTO auth_rate_limits (scope,subject,attempts,window_ends_at) VALUES ($1,$2,1,now()+($3 * interval '1 second')) ON CONFLICT (scope,subject) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_ends_at <= now() THEN 1 ELSE auth_rate_limits.attempts+1 END, window_ends_at=CASE WHEN auth_rate_limits.window_ends_at <= now() THEN now()+($3 * interval '1 second') ELSE auth_rate_limits.window_ends_at END RETURNING attempts,window_ends_at`, [scope, subject, windowSeconds]);
-  return Number(result.rows[0].attempts) <= maxAttempts;
+  const result = await getPool().query(`INSERT INTO auth_rate_limits (scope,subject,attempts,window_ends_at) VALUES ($1,$2,1,now()+($3 * interval '1 second')) ON CONFLICT (scope,subject) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_ends_at <= now() THEN 1 ELSE auth_rate_limits.attempts+1 END, window_ends_at=CASE WHEN auth_rate_limits.window_ends_at <= now() THEN now()+($3 * interval '1 second') ELSE auth_rate_limits.window_ends_at END RETURNING attempts, GREATEST(1, CEIL(EXTRACT(EPOCH FROM (window_ends_at - now()))))::int AS retry_after`, [scope, subject, windowSeconds]);
+  return { allowed: Number(result.rows[0].attempts) <= maxAttempts, retryAfterSeconds: Number(result.rows[0].retry_after) };
 }
 
 /** Reports whether a subject has already used up its attempts in the current window, without consuming one. */

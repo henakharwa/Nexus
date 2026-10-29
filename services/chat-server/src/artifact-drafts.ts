@@ -260,6 +260,8 @@ export async function aiArtifactDraft(workspaceId: string, artifact: NonNullable
     llmConfig: resolveLlmConfig({ maxTokens: 1400 }),
   });
   const content = result.reply.trim();
+  const tokens = result.providerPromptTokens + result.providerCompletionTokens || Math.ceil((request.length + content.length) / 4);
+  await db.recordWorkspaceTokenUsage(workspaceId, tokens).catch(() => undefined);
   if (!content) throw new Error("The AI model returned an empty draft.");
   return content;
 }

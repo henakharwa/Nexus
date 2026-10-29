@@ -483,6 +483,26 @@ export async function listWorkflowRuns(
   );
   return (await parseJsonOrThrow(res)) as import("@mai-chat/shared-types").WorkflowRun[];
 }
+// Daily AI token budget (Security Validation scope 14).
+export async function getWorkspaceTokenBudget(
+  workspaceId: string,
+): Promise<import("@mai-chat/shared-types").WorkspaceTokenBudget> {
+  const res = await authenticatedFetch(
+    `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/observability/token-budget`,
+  );
+  return (await parseJsonOrThrow(res)) as import("@mai-chat/shared-types").WorkspaceTokenBudget;
+}
+/** null returns the workspace to the server default. Admin only. */
+export async function updateWorkspaceTokenBudget(
+  workspaceId: string,
+  dailyTokenBudget: number | null,
+): Promise<import("@mai-chat/shared-types").WorkspaceTokenBudget> {
+  const res = await authenticatedFetch(
+    `${CHAT_SERVER_URL}/workspaces/${encodeURIComponent(workspaceId)}/observability/token-budget`,
+    { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ dailyTokenBudget }) },
+  );
+  return (await parseJsonOrThrow(res)) as import("@mai-chat/shared-types").WorkspaceTokenBudget;
+}
 export async function getObservabilityRetentionPolicy(
   workspaceId: string,
 ): Promise<import("@mai-chat/shared-types").ObservabilityRetentionPolicy> {

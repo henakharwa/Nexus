@@ -1,0 +1,18 @@
+# gitleaks configuration for the secret scan in .github/workflows/security.yml
+# (Security Validation scope 13). Uses gitleaks' default rules; the only
+# exceptions are test fixtures and documented placeholder values, which are
+# fake by design.
+title = "Nexus secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake tokens in tests and placeholder values in example env files"
+paths = [
+  '''(^|/)tests?/''',
+  '''^e2e/''',
+  '''\.env(\.[a-z]+)?\.example$''',
+  '''^\.github/workflows/ci\.yml$''',
+  '''(^|/)package-lock\.json$''',
+]

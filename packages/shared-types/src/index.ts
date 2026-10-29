@@ -961,6 +961,8 @@ export type AuditEventType =
   | "member.join_denied"
   | "integration.connected"
   | "workspace.permissions_updated"
+  // Scope 14: an Admin changed the workspace's daily AI token budget.
+  | "workspace.budget_updated"
   | "agent.created"
   | "agent.updated"
   | "agent.deleted"
@@ -1033,4 +1035,23 @@ export interface AuditEvent {
   summary: string;
   metadata: Record<string, unknown>;
   createdAt: string;
+}
+
+// Daily AI token budget for a workspace (Security Validation scope 14).
+// Usage is counted per UTC day from chat replies, workflow runs and AI drafts.
+export interface WorkspaceTokenBudget {
+  dailyLimit: number;
+  defaultLimit: number;
+  /** True when an Admin chose a limit; false when the server default applies. */
+  isCustom: boolean;
+  usedToday: number;
+  agentTurnsToday: number;
+  remaining: number;
+  exhausted: boolean;
+  /** Next UTC midnight. */
+  resetsAt: string;
+  /** The last 7 UTC days that had any usage, oldest first. */
+  recentDays: Array<{ date: string; tokens: number; agentTurns: number }>;
+  /** Limits an Admin can choose. */
+  choices: number[];
 }

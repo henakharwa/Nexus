@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:18-alpine
+    image: &postgres_image postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-multiplayer_ai}
@@ -13,6 +13,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  # One-off step before Nexus starts: the app now runs as the unprivileged
+  # "node" user (uid 1000), so make sure Caddy's certificate volumes, which
+  # earlier root-run versions created, belong to that user. It exits at once
+  # when they already do.
+  volume-permissions:
+    image: *postgres_image
+    user: "0:0"
+    entrypoint: ["sh", "-c", "chown -R 1000:1000 /data/caddy /config/caddy"]
+    volumes:
+      - caddy_data:/data/caddy
+      - caddy_config:/config/caddy
+    restart: "no"
+    network_mode: none
 
   nexus:
     build:
@@ -27,6 +41,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      volume-permissions:
+        condition: service_completed_successfully
+    # Runs as a non-root user with no extra Linux capabilities. Binding ports
+    # 80 and 443 then needs this (namespaced) setting instead of root.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "80:80"
       - "443:443"
@@ -34,8 +58,8 @@ services:
       # Caddy stores its ACME account and certificates here. Keeping these
       # across image rebuilds prevents a new certificate request on every
       # deployment (and avoids Let's Encrypt rate limits).
-      - caddy_data:/root/.local/share/caddy
-      - caddy_config:/root/.config/caddy
+      - caddy_data:/data/caddy
+      - caddy_config:/config/caddy
     environment:
       PORT: "80"
       CADDY_CONFIG: /app/Caddyfile.oracle

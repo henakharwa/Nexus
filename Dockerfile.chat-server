@@ -15,4 +15,6 @@ RUN npm ci \
 COPY --from=github_mcp /server/github-mcp-server /usr/local/bin/github-mcp-server
 ENV NODE_ENV=production
 ENV GITHUB_MCP_COMMAND=github-mcp-server
+# Run as the image's unprivileged "node" user, not root.
+USER node
 CMD ["npm", "run", "start:server"]

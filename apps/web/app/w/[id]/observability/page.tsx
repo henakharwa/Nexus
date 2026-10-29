@@ -3,18 +3,26 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import type { AuditEvent, IntegrationConfig, WorkflowRun, WorkspaceWorkflow } from "@mai-chat/shared-types";
+import type {
+  AuditEvent,
+  IntegrationConfig,
+  WorkflowRun,
+  WorkspaceTokenBudget,
+  WorkspaceWorkflow,
+} from "@mai-chat/shared-types";
 import { AccessNotice } from "../../../_components/AccessNotice";
 import { useWorkspaceAccess } from "../../../../lib/useWorkspaceAccess";
 import {
   describeError,
   getObservabilityRetentionPolicy,
+  getWorkspaceTokenBudget,
   listAuditEvents,
   listIntegrations,
   listWorkspaceWorkflowRuns,
   listWorkspaceWorkflows,
   updateFailureAlertThreshold,
   updateObservabilityRetentionPolicy,
+  updateWorkspaceTokenBudget,
 } from "../../../../lib/api";
 
 type RunWithWorkflow = WorkflowRun & { workflowName: string };
@@ -38,6 +46,13 @@ function duration(run: WorkflowRun) {
   );
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
+function compactTokens(value: number) {
+  return value >= 1_000_000
+    ? `${Number((value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0))}M`
+    : value >= 1_000
+      ? `${Math.round(value / 1_000)}k`
+      : String(value);
+}
 function bucketLabel(value: number, range: "24h" | "7d" | "30d" | "all") {
   return range === "24h"
     ? new Date(value).toLocaleTimeString([], { hour: "numeric" })
@@ -59,9 +74,33 @@ export default function ObservabilityPage() {
   const [perTurnTokenLimit, setPerTurnTokenLimit] = useState<number | null>(null);
   const [retentionDays, setRetentionDays] = useState(30);
   const [retentionNotice, setRetentionNotice] = useState("");
+  const [tokenBudget, setTokenBudget] = useState<WorkspaceTokenBudget | null>(null);
+  const [budgetNotice, setBudgetNotice] = useState("");
   // Viewing observability is shared; retention and alert thresholds are Admin only.
   const access = useWorkspaceAccess(workspaceId);
   const canControl = access.isAdmin;
+
+  // Loaded on its own so a budget error never hides the rest of the page.
+  useEffect(() => {
+    let cancelled = false;
+    getWorkspaceTokenBudget(workspaceId)
+      .then((budget) => {
+        if (!cancelled) setTokenBudget(budget);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+  async function saveTokenBudget(value: number | null) {
+    setBudgetNotice("");
+    try {
+      setTokenBudget(await updateWorkspaceTokenBudget(workspaceId, value));
+      setBudgetNotice("Daily AI budget saved.");
+    } catch (reason) {
+      setBudgetNotice(describeError(reason, "Could not save the daily AI budget."));
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -392,6 +431,64 @@ export default function ObservabilityPage() {
             </div>
           </header>
           <div className="budget-list">
+            {tokenBudget && (
+              <div className={`daily-token-budget ${tokenBudget.exhausted ? "exhausted" : ""}`}>
+                <span>Daily AI token budget</span>
+                <strong>
+                  {tokenBudget.usedToday.toLocaleString()} / {tokenBudget.dailyLimit.toLocaleString()} tokens
+                </strong>
+                <div
+                  className="token-budget-meter"
+                  role="meter"
+                  aria-label="Daily AI token budget used"
+                  aria-valuemin={0}
+                  aria-valuemax={tokenBudget.dailyLimit}
+                  aria-valuenow={Math.min(tokenBudget.usedToday, tokenBudget.dailyLimit)}
+                >
+                  <i style={{ width: `${Math.min(100, (tokenBudget.usedToday / tokenBudget.dailyLimit) * 100)}%` }} />
+                </div>
+                <small>
+                  {tokenBudget.exhausted
+                    ? "Used up: new agent replies, workflow runs and AI drafts wait until the reset."
+                    : `${tokenBudget.remaining.toLocaleString()} left today across ${tokenBudget.agentTurnsToday} agent turn${tokenBudget.agentTurnsToday === 1 ? "" : "s"}.`}{" "}
+                  Resets at midnight UTC (
+                  {new Date(tokenBudget.resetsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} your
+                  time).
+                </small>
+                {tokenBudget.recentDays.length > 1 && (
+                  <ol className="token-budget-days" aria-label="Tokens used in the last 7 days">
+                    {tokenBudget.recentDays.map((day) => (
+                      <li key={day.date} title={`${day.date}: ${day.tokens.toLocaleString()} tokens`}>
+                        <i
+                          style={{
+                            height: `${Math.max(4, Math.min(100, (day.tokens / tokenBudget.dailyLimit) * 100))}%`,
+                          }}
+                        />
+                        <em>{new Date(`${day.date}T12:00:00Z`).toLocaleDateString([], { weekday: "narrow" })}</em>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                <label className="observability-control">
+                  Daily limit
+                  <select
+                    value={tokenBudget.isCustom ? String(tokenBudget.dailyLimit) : "default"}
+                    disabled={!canControl}
+                    onChange={(event) =>
+                      void saveTokenBudget(event.target.value === "default" ? null : Number(event.target.value))
+                    }
+                  >
+                    <option value="default">Server default ({compactTokens(tokenBudget.defaultLimit)})</option>
+                    {tokenBudget.choices.map((choice) => (
+                      <option key={choice} value={choice}>
+                        {compactTokens(choice)} tokens
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {budgetNotice && <small role="status">{budgetNotice}</small>}
+              </div>
+            )}
             <div>
               <span>Per-turn token guard</span>
               <strong>{perTurnTokenLimit === null ? "—" : `${perTurnTokenLimit.toLocaleString()} tokens`}</strong>

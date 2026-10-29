@@ -3,6 +3,7 @@ import * as db from "@mai-chat/db";
 import { paramString } from "../http-utils.js";
 import type { Request, Response } from "express";
 import type { RouteContext } from "./context.js";
+import { ABUSE_LIMITS, enforceAbuseLimit } from "../abuse-limits.js";
 
 const AGENT_NAME_MAX = 80;
 
@@ -37,6 +38,7 @@ export function registerAgentsRoutes({ app, requireRole, requirePermission }: Ro
       return res.status(400).json({ error: "A name and base agent are required." });
     if (name.length > AGENT_NAME_MAX)
       return res.status(400).json({ error: `Agent names can be up to ${AGENT_NAME_MAX} characters.` });
+    if (!(await enforceAbuseLimit(res, ABUSE_LIMITS.agentCreate, req.user!.id))) return;
     const agent = await db.createWorkspaceAgent({
       workspaceId: paramString(req.params.id),
       name,
