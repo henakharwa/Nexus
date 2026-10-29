@@ -51,7 +51,7 @@ jobs:
 
       - name: ZAP baseline scan
         if: env.SKIP != '1'
-        uses: zaproxy/action-baseline@v0.14.0
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: ${{ env.TARGET }}
           rules_file_name: .zap/rules.tsv
