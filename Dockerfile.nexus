@@ -18,6 +18,15 @@ ENV NEXT_PUBLIC_EMAIL_VERIFICATION_ENABLED=$NEXT_PUBLIC_EMAIL_VERIFICATION_ENABL
 ENV NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT
 COPY . .
 RUN npm ci && npm run build --workspace=packages/shared-types && npm run build --workspace=packages/db && npm run build --workspace=packages/integrations && npm run build --workspace=services/chat-server && npm run build --workspace=apps/web
+# Trim build-only tools from the runtime image (Trivy image scan):
+# - node:22 ships npm 10, whose bundled pacote, sigstore, ip-address, picomatch
+#   and brace-expansion have HIGH CVEs; npm 11.21.1 bundles fixed versions.
+#   npm stays because scripts/start-nexus.sh uses it.
+# - TypeScript 7's native compiler is a Go binary used only by the build above;
+#   tsx (migrations) and next start do not need it.
+RUN npm install -g npm@11.21.1 \
+  && find node_modules -type d -path '*/@typescript/typescript-linux-*' -prune -exec rm -rf {} + \
+  && npm cache clean --force
 COPY --from=github_mcp /server/github-mcp-server /usr/local/bin/github-mcp-server
 COPY --from=caddy /usr/bin/caddy /usr/local/bin/caddy
 RUN apt-get update \
