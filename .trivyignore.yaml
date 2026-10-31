@@ -1,0 +1,37 @@
+# Trivy findings accepted on purpose (Security Validation scope 13).
+# Each entry is limited to the binary it was found in, states why it is
+# accepted, and expires: after expired_at Trivy reports it again and CI fails,
+# which forces a review. Keep this list short: prefer upgrading the image or
+# dependency, and remove an entry as soon as an upstream release fixes it.
+vulnerabilities:
+  # Caddy v2.11.7 (latest caddy:2-alpine, checked 2026-10-31) is built with
+  # Go 1.26.8, golang.org/x/net v0.59.0 and go-jose v4.1.5. x/net is fixed on
+  # Caddy's main branch but not released; go-jose is not yet bumped upstream.
+  # Here Caddy terminates TLS and proxies to plain HTTP on localhost, so the
+  # x509 issue only touches its own outbound ACME connection.
+  - id: CVE-2026-111943
+    paths: ["usr/local/bin/caddy"]
+    statement: crypto/x509 in Go 1.26.8; waiting for a Caddy release built with Go 1.26.10+ or 1.27.3+
+    expired_at: 2026-11-14
+  - id: CVE-2026-78667
+    paths: ["usr/local/bin/caddy"]
+    statement: net/http Range DoS in Go 1.26.8; waiting for a Caddy release on a newer Go
+    expired_at: 2026-11-14
+  - id: CVE-2026-78669
+    paths: ["usr/local/bin/caddy"]
+    statement: HTTP/2 SETTINGS DoS (x/net v0.59.0 and Go stdlib); fixed on Caddy main, not yet released
+    expired_at: 2026-11-14
+  - id: CVE-2026-97031
+    paths: ["usr/local/bin/caddy"]
+    statement: crypto/tls ECH DoS in Go 1.26.8; waiting for a Caddy release on a newer Go
+    expired_at: 2026-11-14
+  - id: CVE-2026-116587
+    paths: ["usr/local/bin/caddy"]
+    statement: go-jose v4.1.5 JWK DoS; Caddy has not bumped go-jose to v4.1.6 yet
+    expired_at: 2026-11-14
+  # github-mcp-server v2.0.3 (latest image, checked 2026-10-31) pins
+  # golang.org/x/net v0.59.0; main already uses v0.61.0, not yet released.
+  - id: CVE-2026-78669
+    paths: ["usr/local/bin/github-mcp-server"]
+    statement: HTTP/2 SETTINGS DoS in x/net v0.59.0; fixed on github-mcp-server main, not yet released
+    expired_at: 2026-11-14
